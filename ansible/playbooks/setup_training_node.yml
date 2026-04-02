@@ -1,0 +1,199 @@
+---
+# setup_training_node.yml
+# Configures a Chameleon Cloud MI100 bare-metal node for LeRobot training
+#
+# Usage:
+#   ansible-playbook -i inventory.yml playbooks/setup_training_node.yml
+#
+# Or from the Chameleon Jupyter notebook:
+#   ansible-playbook -i "<floating_ip>," -u cc playbooks/setup_training_node.yml
+
+- name: Configure MI100 Training Node
+  hosts: training
+  become: true
+  vars:
+    rocm_version: "6.3"
+    rocm_pkg_version: "6.3.4"
+    pytorch_version: "2.7.1"
+    lerobot_version: "v0.4.1"
+    conda_home: "/home/cc/miniconda3"
+    conda_env: "lerobot"
+    python_version: "3.10"
+    hf_user: "ricklon"
+
+  tasks:
+    # ── System Prerequisites ──
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      apt:
+        name:
+          - linux-headers-{{ ansible_kernel }}
+          - python3-setuptools
+          - python3-wheel
+          - git
+          - wget
+          - curl
+          - htop
+          - tmux
+          - build-essential
+        state: present
+
+    - name: Add cc user to render and video groups
+      user:
+        name: cc
+        groups: render,video
+        append: true
+
+    # ── ROCm Installation ──
+    - name: Check if ROCm is already installed
+      command: rocm-smi --version
+      register: rocm_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Download amdgpu-install package
+      get_url:
+        url: "https://repo.radeon.com/amdgpu-install/{{ rocm_pkg_version }}/ubuntu/jammy/amdgpu-install_{{ rocm_pkg_version | regex_replace('\\.', '') }}-1_all.deb"
+        dest: /tmp/amdgpu-install.deb
+      when: rocm_check.rc != 0
+
+    - name: Install amdgpu-install package
+      apt:
+        deb: /tmp/amdgpu-install.deb
+      when: rocm_check.rc != 0
+
+    - name: Install ROCm
+      command: amdgpu-install -y --usecase=rocm --no-dkms
+      when: rocm_check.rc != 0
+
+    - name: Clean up installer
+      file:
+        path: /tmp/amdgpu-install.deb
+        state: absent
+
+    # ── Verify GPU ──
+    - name: Verify MI100 is detected
+      command: rocminfo
+      register: rocminfo_out
+      changed_when: false
+
+    - name: Show GPU info
+      debug:
+        msg: "{{ rocminfo_out.stdout_lines | select('search', 'gfx') | list }}"
+
+    # ── Miniconda (runs as cc user) ──
+    - name: Check if Miniconda is installed
+      stat:
+        path: "{{ conda_home }}/bin/conda"
+      register: conda_bin
+      become: false
+
+    - name: Download Miniconda
+      get_url:
+        url: https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+        dest: /tmp/miniconda.sh
+        mode: "0755"
+      when: not conda_bin.stat.exists
+      become: false
+
+    - name: Install Miniconda
+      command: bash /tmp/miniconda.sh -b -p {{ conda_home }}
+      when: not conda_bin.stat.exists
+      become: false
+
+    - name: Remove Miniconda installer
+      file:
+        path: /tmp/miniconda.sh
+        state: absent
+
+    - name: Initialize conda for bash
+      command: "{{ conda_home }}/bin/conda init bash"
+      become: false
+      changed_when: false
+
+    # ── Conda Environment + PyTorch ROCm ──
+    - name: Check if conda env exists
+      command: "{{ conda_home }}/bin/conda env list"
+      register: conda_envs
+      changed_when: false
+      become: false
+
+    - name: Create conda environment
+      command: "{{ conda_home }}/bin/conda create -y -n {{ conda_env }} python={{ python_version }}"
+      when: conda_env not in conda_envs.stdout
+      become: false
+
+    - name: Install PyTorch with ROCm
+      command: >
+        {{ conda_home }}/envs/{{ conda_env }}/bin/pip install
+        torch=={{ pytorch_version }}
+        torchvision==0.22.1
+        torchaudio=={{ pytorch_version }}
+        --index-url https://download.pytorch.org/whl/rocm{{ rocm_version }}
+      become: false
+      register: pytorch_install
+      changed_when: "'already satisfied' not in pytorch_install.stdout"
+
+    - name: Install ffmpeg via conda
+      command: "{{ conda_home }}/bin/conda install -y -n {{ conda_env }} ffmpeg=7.1.1 -c conda-forge"
+      become: false
+      register: ffmpeg_install
+      changed_when: "'already installed' not in ffmpeg_install.stdout"
+
+    # ── LeRobot ──
+    - name: Clone LeRobot
+      git:
+        repo: https://github.com/huggingface/lerobot.git
+        dest: /home/cc/lerobot
+        version: "{{ lerobot_version }}"
+      become: false
+
+    - name: Install LeRobot in dev mode
+      command: "{{ conda_home }}/envs/{{ conda_env }}/bin/pip install -e ."
+      args:
+        chdir: /home/cc/lerobot
+      become: false
+      register: lerobot_install
+      changed_when: "'already satisfied' not in lerobot_install.stdout"
+
+    - name: Install HuggingFace CLI
+      command: "{{ conda_home }}/envs/{{ conda_env }}/bin/pip install huggingface-hub[cli]"
+      become: false
+      register: hfcli_install
+      changed_when: "'already satisfied' not in hfcli_install.stdout"
+
+    # ── Verification ──
+    - name: Verify PyTorch sees the MI100
+      command: >
+        {{ conda_home }}/envs/{{ conda_env }}/bin/python -c
+        "import torch;
+        assert torch.cuda.is_available(), 'NO GPU';
+        print(f'PyTorch {torch.__version__}');
+        print(f'GPU: {torch.cuda.get_device_name(0)}');
+        print(f'VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB')"
+      register: verify
+      become: false
+      changed_when: false
+
+    - name: Show verification
+      debug:
+        msg: "{{ verify.stdout_lines }}"
+
+    - name: Verify LeRobot
+      command: "{{ conda_home }}/envs/{{ conda_env }}/bin/pip show lerobot"
+      register: lerobot_ver
+      become: false
+      changed_when: false
+
+    - name: Show LeRobot version
+      debug:
+        msg: "{{ lerobot_ver.stdout_lines | select('search', 'Version') | list }}"
+
+  handlers:
+    - name: Reboot for ROCm
+      reboot:
+        reboot_timeout: 300

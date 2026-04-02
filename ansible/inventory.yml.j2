@@ -1,0 +1,16 @@
+---
+# inventory.yml
+# Generated or edited with the floating IP from Chameleon
+#
+# For dynamic use from the notebook, you can also skip this file and use:
+#   ansible-playbook -i "<floating_ip>," -u cc playbooks/setup_training_node.yml
+
+all:
+  children:
+    training:
+      hosts:
+        mi100:
+          ansible_host: "{{ floating_ip }}"
+          ansible_user: cc
+          ansible_ssh_private_key_file: /work/.ssh/id_rsa
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
