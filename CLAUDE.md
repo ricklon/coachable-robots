@@ -66,6 +66,7 @@ coachable-robots/
 │   ├── benchmark_inference.py        # Latency measurement across tiers
 │   └── results/                      # JSON benchmark outputs per device
 └── docs/
+    ├── pi5-chi-edge-setup.md         # Pi 5 enrollment on CHI@Edge
     └── chameleon-user-meeting/       # Presentation materials (April 2026)
 ```
 

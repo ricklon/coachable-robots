@@ -56,6 +56,11 @@ coachable-robots/
 
 ## Quick start
 
+### 0. Enroll Pi 5 on CHI@Edge
+
+Follow [docs/pi5-chi-edge-setup.md](docs/pi5-chi-edge-setup.md) to register your
+Raspberry Pi 5 as a CHI@Edge device using BalenaOS.
+
 ### 1. Collect demonstrations (Pi edge)
 
 ```bash
