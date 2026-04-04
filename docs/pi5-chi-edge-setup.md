@@ -57,15 +57,16 @@ chi-edge --help
 1. Log in to **https://chi.edge.chameleoncloud.org**
 2. Navigate to **Identity > Application Credentials**
 3. Click **Create Application Credential**
-   - Name: `edge-pi5`
+   - Name: `coachable-robots` — project-level credential, reused for all
+     devices (not per-Pi; the device name is where you get specific)
    - Leave roles and expiration as defaults
 4. **Save the secret immediately** — it is shown only once
-5. Download the RC file (e.g., `app-cred-edge-openrc.sh`)
+5. Download the RC file (e.g., `app-cred-coachable-robots-openrc.sh`)
 
 Source the RC file to load credentials into your shell:
 
 ```bash
-source app-cred-edge-openrc.sh
+source app-cred-coachable-robots-openrc.sh
 ```
 
 Verify:
@@ -86,14 +87,15 @@ chi-edge device register \
 ```
 
 Notes:
+- `soarm101-1` names the Pi controlling arm unit #1. Add arms by
+  registering `soarm101-2`, `soarm101-3`, etc. — each gets its own UUID
+  and baked image, but they all share the same `coachable-robots` credential
 - `--machine-name raspberrypi5` is the machine type for Pi 5. The CLI also
   lists `raspberrypi5-64` as an option; use `raspberrypi5` to match the
   BalenaOS device type used by `balena os download`
 - Supported machine names: `raspberrypi3-64`, `raspberrypi4-64`,
   `raspberrypi5`, `jetson-nano`, `jetson-xavier-nx-emmc`,
   `jetson-agx-orin-devkit`, `coral-dev`
-- `soarm101-1` is your device name — must match `DEVICE_NAME` in
-  `Request_LeRobot_SOARM101.ipynb`
 - The command returns a **device UUID** — save it for the bake step
 
 ## Step 3: Download BalenaOS via Balena CLI
@@ -132,18 +134,44 @@ Notes:
 - Omit `--version` to download the latest release (production); always
   specify `.dev` explicitly for the development image
 
-Extract the image (balena flash can also read `.img.gz` directly, but
-baking with chi-edge requires an uncompressed `.img`):
+Despite the `-o` filename ending in `.img.gz`, balena CLI downloads an
+**uncompressed** disk image. Rename it to remove the misleading extension:
 
 ```bash
-gunzip balena-raspberrypi5-6.10.24.dev.img.gz
-# Result: balena-raspberrypi5-6.10.24.dev.img
+mv balena-raspberrypi5-6.10.24.dev.img.gz balena-raspberrypi5-6.10.24.dev.img
+# Verify:
+file balena-raspberrypi5-6.10.24.dev.img
+# → DOS/MBR boot sector ...  (confirms it's already a raw image)
 ```
 
-## Step 4: Bake the Image
+## Step 4: Configure the Image (SSH Keys)
+
+Before baking, inject your SSH public key from your balena.io account into
+the image. This is required to SSH into the device after flashing — skipping
+this step leaves SSH locked with no way to log in.
+
+```bash
+balena os configure balena-raspberrypi5-6.10.24.dev.img \
+  --device-type raspberrypi5 \
+  --version 6.10.24
+```
+
+This reads your SSH public key from your balena cloud account and writes it
+into the image's `config.json`. You must be logged in (`balena login`) for
+this to work.
+
+After flashing, SSH in with:
+```bash
+ssh -p 22222 root@<pi-ip>
+```
+
+## Step 5: Bake the Image
 
 Baking injects your device-specific credentials and CHI@Edge registration
-into the image. Use the device UUID returned in Step 2:
+into the image. **Bake must happen after configure** — it patches the same
+config file and must be the final modification before flashing.
+
+Use the device UUID returned in Step 2:
 
 ```bash
 chi-edge device bake \
@@ -154,7 +182,7 @@ chi-edge device bake \
 This modifies the image in place — the output file is now personalized for
 your specific device and should not be reused for other devices.
 
-## Step 5: Flash the Image via Balena CLI
+## Step 6: Flash the Image via Balena CLI
 
 Choose the boot media that matches your setup.
 
@@ -223,7 +251,7 @@ balena local flash balena-raspberrypi5-6.10.24.dev.img --drive /dev/nvme0n1 --ye
 Remove the microSD (or leave it — the updated boot order prefers NVME)
 and power on the Pi.
 
-## Step 6: Boot and Verify Enrollment
+## Step 7: Boot and Verify Enrollment
 
 1. Insert boot media (microSD or NVME) into the Pi 5
 2. Connect Ethernet — **Wi-Fi is not supported** by BalenaOS on CHI@Edge
@@ -251,7 +279,7 @@ Confirm in the portal:
 2. Navigate to **Hardware > Devices**
 3. Confirm `soarm101-1` appears with status **enrolled**
 
-## Optional: Restrict Device Access
+## Step 8: Restrict Device Access (Optional)
 
 Limit which projects can lease your device:
 
