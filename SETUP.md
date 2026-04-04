@@ -88,7 +88,64 @@ Follow [docs/pi5-chi-edge-setup.md](docs/pi5-chi-edge-setup.md) to:
 3. Bake the image with `chi-edge device bake`
 4. Flash with `balena local flash`
 
-## Step 6: Run the pipeline
+## Step 6: Set Up Chameleon JupyterHub
+
+JupyterHub at **https://jupyter.chameleoncloud.org** is where you run the
+orchestration notebook. It takes 3-5 minutes to spin up on first load.
+
+Once it's running, open a terminal and:
+
+```bash
+# Clone the repo into your persistent /work directory
+cd /work
+git clone https://github.com/YOUR_GITHUB_USERNAME/coachable-robots.git
+cd coachable-robots
+```
+
+Recreate the gitignored instance files (vault.yml comes with the clone
+since it's encrypted and committed):
+
+```bash
+# Vault password — same password you used locally
+echo 'your-vault-password' > ansible/.vault_pass
+chmod 600 ansible/.vault_pass
+
+# vars.yml
+cp ansible/group_vars/all/vars.example.yml ansible/group_vars/all/vars.yml
+vim ansible/group_vars/all/vars.yml   # set hf_user
+```
+
+Set your CHI@Edge credentials in the environment. Either source the RC file
+if you've uploaded it, or export directly:
+
+```bash
+export OS_AUTH_TYPE=v3applicationcredential
+export OS_AUTH_URL=https://chi.edge.chameleoncloud.org:5000/v3
+export OS_IDENTITY_API_VERSION=3
+export OS_REGION_NAME="CHI@Edge"
+export OS_APPLICATION_CREDENTIAL_ID=YOUR_CREDENTIAL_ID
+export OS_APPLICATION_CREDENTIAL_SECRET=YOUR_CREDENTIAL_SECRET
+```
+
+The SSH key for accessing bare-metal training nodes lives at `/work/.ssh/id_rsa`
+on JupyterHub — generate it if it doesn't exist:
+
+```bash
+ls /work/.ssh/id_rsa || ssh-keygen -t ed25519 -f /work/.ssh/id_rsa -N ""
+```
+
+Register it with Nova before launching your first training server:
+
+```python
+from chi import clients
+nova = clients.nova()
+with open("/work/.ssh/id_rsa.pub") as f:
+    nova.keypairs.create(name="YOUR_KEY_NAME", public_key=f.read())
+```
+
+Then open `CoachableRobots_v3.ipynb` and update the `# CONFIGURE:` cells.
+
+## Step 7: Run the pipeline
 
 1. **Collect**: Pi runs `lerobot-record` via Xbox controller → HuggingFace Hub
 2. **Train**: Run `CoachableRobots_v3.ipynb` on Chameleon JupyterHub
