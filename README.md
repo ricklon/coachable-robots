@@ -105,6 +105,13 @@ lerobot-record \
     --dataset.single_task="Pick up the block"
 ```
 
+## Platform support
+
+Recording works on Pi 5 (CHI@Edge and local), Linux laptops, and macOS.
+Both SO-ARM100 and SO-ARM101 are supported (SO-ARM101 is a cosmetic update).
+See [docs/platform-support.md](docs/platform-support.md) for the full
+compatibility matrix of teleop inputs, simulation, and per-platform install.
+
 ## Hardware requirements
 
 | Component | Spec |

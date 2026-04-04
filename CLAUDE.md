@@ -67,6 +67,7 @@ coachable-robots/
 │   └── results/                      # JSON benchmark outputs per device
 └── docs/
     ├── pi5-chi-edge-setup.md         # Pi 5 enrollment on CHI@Edge
+    ├── platform-support.md           # Platform x input x simulation matrix
     └── chameleon-user-meeting/       # Presentation materials (April 2026)
 ```
 
