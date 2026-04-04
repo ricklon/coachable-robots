@@ -94,7 +94,12 @@ Replace `DEVICE_UUID` with the UUID returned in Step 3.
 This modifies the image in place — the output is the same file, now
 personalized for your device.
 
-## Step 6: Flash to MicroSD
+## Step 6: Flash the Image
+
+The Pi 5 can boot from either **microSD** or **NVME**. Choose the option
+that matches your setup.
+
+### Option A: Flash to MicroSD
 
 Use [Balena Etcher](https://etcher.balena.io/) or `dd`:
 
@@ -107,16 +112,79 @@ sudo dd if=balena-raspberrypi5-6.10.24+rev3.img of=/dev/sdX bs=4M status=progres
 sync
 ```
 
+Insert the microSD card into the Pi 5. If an NVME drive is also installed,
+it is available as secondary storage for dataset recording (see
+[NVME as Data Drive](#nvme-as-data-drive) below).
+
+### Option B: Flash to NVME
+
+Booting from NVME gives faster I/O for dataset recording and container
+operations. This requires updating the Pi 5 bootloader first.
+
+**1. Update the bootloader EEPROM to support NVME boot**
+
+On a working Pi 5 (booted from microSD with Raspberry Pi OS):
+
+```bash
+# Update to latest firmware
+sudo rpi-eeprom-update -a
+sudo reboot
+
+# After reboot, edit the boot order
+sudo raspi-config
+```
+
+Navigate to: **Advanced Options > Boot Order > NVMe/USB Boot**
+
+Or set it directly:
+
+```bash
+# Edit EEPROM config
+sudo rpi-eeprom-config --edit
+```
+
+Set the `BOOT_ORDER` line to try NVME first, then SD:
+
+```
+BOOT_ORDER=0xf416
+```
+
+Boot order digits (right to left): `6`=NVME, `1`=SD, `4`=USB, `f`=restart.
+So `0xf416` tries NVME, then SD, then USB, then retries.
+
+```bash
+# Apply and reboot
+sudo reboot
+```
+
+**2. Flash BalenaOS to the NVME drive**
+
+Connect the NVME drive to another machine (via USB-to-NVME adapter) or
+flash while the Pi is booted from microSD:
+
+```bash
+# Identify the NVME device
+lsblk
+# Typically /dev/nvme0n1
+
+# Flash (BE CAREFUL — wrong device = data loss)
+sudo dd if=balena-raspberrypi5-6.10.24+rev3.img of=/dev/nvme0n1 bs=4M status=progress
+sync
+```
+
+**3. Remove the microSD card** (or leave it — the boot order will
+prefer NVME) and power on.
+
 ## Step 7: Boot and Verify
 
-1. Insert the microSD card into the Pi 5
+1. Ensure the boot media is inserted (microSD or NVME, per your choice)
 2. Connect Ethernet (required for initial enrollment — Wi-Fi is not
    supported by BalenaOS on CHI@Edge)
 3. Connect the SO-ARM101 (USB serial) and cameras (USB) if available
 4. Power on
 
 The Pi will automatically:
-- Boot BalenaOS from the microSD
+- Boot BalenaOS from the selected media
 - Download CHI@Edge services
 - Connect via WireGuard to the control plane
 - Self-register as a reservable device
@@ -137,10 +205,20 @@ is enrolled and available for reservation.
 2. Navigate to **Hardware > Devices**
 3. Confirm `soarm101-1` appears with status **enrolled**
 
-## NVME Drive
+## NVME Storage
 
-BalenaOS boots from microSD only. The NVME drive is not used for the OS
-but can be mounted inside containers for dataset storage:
+### NVME as Boot Drive
+
+If you flashed BalenaOS to the NVME (Option B above), the full NVME is
+used by BalenaOS. Container storage and dataset recording will
+automatically use the NVME — no extra configuration needed. This is the
+recommended setup for data collection since NVME is significantly faster
+than microSD for write-heavy workloads like video recording.
+
+### NVME as Data Drive
+
+If you booted from microSD (Option A) and have a separate NVME drive
+installed, it can be mounted inside containers for dataset storage:
 
 ```python
 # In Request_LeRobot_SOARM101.ipynb, add a volume mount if needed:
@@ -151,7 +229,16 @@ my_container = Container(
 ```
 
 The NVME partition may need to be formatted on first use. You can do this
-via SSH or by running a setup command in the container.
+via SSH or by running a setup command in the container:
+
+```bash
+# Format (only needed once — destroys existing data)
+sudo mkfs.ext4 /dev/nvme0n1p1
+
+# Mount
+sudo mkdir -p /mnt/nvme
+sudo mount /dev/nvme0n1p1 /mnt/nvme
+```
 
 ## Peripheral Access
 
