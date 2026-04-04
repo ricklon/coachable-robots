@@ -1,0 +1,15 @@
+---
+# group_vars/all/vars.example.yml
+# Copy this to vars.yml and fill in your instance values.
+#
+#   cp ansible/group_vars/all/vars.example.yml ansible/group_vars/all/vars.yml
+#
+# vars.yml is gitignored — it stays local to your fork/instance.
+
+# HuggingFace
+hf_user: "YOUR_HF_USERNAME"      # e.g. "ricklon"
+hf_token: "{{ vault_hf_token }}" # set in vault.yml
+
+# CHI@Edge application credential (from your RC file)
+chi_credential_id: "{{ vault_chi_credential_id }}"
+chi_credential_secret: "{{ vault_chi_credential_secret }}"

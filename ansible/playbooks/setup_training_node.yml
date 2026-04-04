@@ -19,7 +19,7 @@
     conda_home: "/home/cc/miniconda3"
     conda_env: "lerobot"
     python_version: "3.12"
-    hf_user: "ricklon"
+    # hf_user and hf_token come from group_vars/all/vars.yml (vault-backed)
 
   tasks:
     # ── System Prerequisites ──
@@ -165,6 +165,12 @@
       become: false
       register: hfcli_install
       changed_when: "'already satisfied' not in hfcli_install.stdout"
+
+    - name: Authenticate HuggingFace CLI
+      command: "{{ conda_home }}/envs/{{ conda_env }}/bin/huggingface-cli login --token {{ hf_token }}"
+      become: false
+      no_log: true
+      changed_when: false
 
     # ── Verification ──
     - name: Verify PyTorch sees the MI100

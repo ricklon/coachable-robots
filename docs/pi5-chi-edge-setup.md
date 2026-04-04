@@ -3,52 +3,78 @@
 Enroll a Raspberry Pi 5 as a user-owned device on Chameleon Cloud's CHI@Edge
 infrastructure for SO-ARM101 data collection with LeRobot.
 
+This guide uses **Balena CLI** to download and flash BalenaOS and
+**chi-edge CLI** to register, bake, and monitor the device.
+
 ## Prerequisites
 
 | Item | Details |
 |------|---------|
 | Chameleon account | Active allocation on project `CHI-261589` |
-| Pi 5 | 8 GB RAM, microSD card (16 GB+) |
-| NVME drive | Optional — for dataset storage inside containers |
-| SO-ARM101 | Follower arm + leader arm, Feetech STS3215 servos |
+| balena.io account | Free account at https://dashboard.balena-cloud.com |
+| Pi 5 | 8 GB RAM |
+| Boot media | microSD (16 GB+) or NVME SSD |
+| SO-ARM101 | Follower arm + Feetech STS3215 servos |
 | USB cameras | 2x, for top and side views |
-| Workstation | Linux/macOS with Python 3.10+ for the CHI@Edge SDK |
+| Workstation | Linux/macOS with Python 3.10+ and Node.js 18+ |
 
-## Step 1: Create an Application Credential
+## Install CLIs
 
-1. Log in to **https://chi.edge.chameleoncloud.org**
-2. Navigate to **Identity > Application Credentials**
-   (direct: `https://chi.edge.chameleoncloud.org/identity/application_credentials/`)
-3. Click **Create Application Credential**
-   - Name: `edge-pi5` (or any descriptive name)
-   - Leave roles and expiration as defaults
-4. **Save the secret immediately** — you only see it once. If lost, delete and
-   recreate the credential.
-5. Download the RC file (e.g., `app-cred-edge-openrc.sh`)
-
-## Step 2: Install the CHI@Edge SDK
-
-On your workstation (not the Pi):
+### Balena CLI
 
 ```bash
+# Option 1: via npm (requires Node.js 18+)
+npm install -g balena-cli
+
+# Option 2: standalone installer
+# Download from https://github.com/balena-io/balena-cli/releases
+# then add to PATH
+
+# Verify (expected output: balena-cli/24.x.x linux-x64 node-vX.X.X)
+balena version
+```
+
+### chi-edge CLI
+
+On Ubuntu/Debian, the system Python is externally managed (PEP 668).
+Use `--break-system-packages` or install into a venv:
+
+```bash
+# Option 1: system-wide (simplest)
+pip install python-chi-edge --break-system-packages
+
+# Option 2: venv (no flag needed, no side effects)
 python3 -m venv chi-edge-env
 source chi-edge-env/bin/activate
 pip install python-chi-edge
+
+# Verify
+chi-edge --help
 ```
 
-Source the RC file to load your credentials into the environment:
+## Step 1: Create a CHI@Edge Application Credential
+
+1. Log in to **https://chi.edge.chameleoncloud.org**
+2. Navigate to **Identity > Application Credentials**
+3. Click **Create Application Credential**
+   - Name: `edge-pi5`
+   - Leave roles and expiration as defaults
+4. **Save the secret immediately** — it is shown only once
+5. Download the RC file (e.g., `app-cred-edge-openrc.sh`)
+
+Source the RC file to load credentials into your shell:
 
 ```bash
 source app-cred-edge-openrc.sh
 ```
 
-Verify the credentials are loaded:
+Verify:
 
 ```bash
 env | grep OS_APPLICATION_CREDENTIAL
 ```
 
-## Step 3: Register the Device
+## Step 2: Register the Device
 
 ```bash
 chi-edge device register \
@@ -60,195 +86,157 @@ chi-edge device register \
 ```
 
 Notes:
-- `--machine-name raspberrypi5` is the device type for Pi 5
-  (Pi 4 uses `raspberrypi4-64`, Pi 3 uses `raspberrypi3-64`)
-- `soarm101-1` is the device name — this must match `DEVICE_NAME` in
+- `--machine-name raspberrypi5` is the machine type for Pi 5. The CLI also
+  lists `raspberrypi5-64` as an option; use `raspberrypi5` to match the
+  BalenaOS device type used by `balena os download`
+- Supported machine names: `raspberrypi3-64`, `raspberrypi4-64`,
+  `raspberrypi5`, `jetson-nano`, `jetson-xavier-nx-emmc`,
+  `jetson-agx-orin-devkit`, `coral-dev`
+- `soarm101-1` is your device name — must match `DEVICE_NAME` in
   `Request_LeRobot_SOARM101.ipynb`
-- Save the returned **device UUID** for the bake step
+- The command returns a **device UUID** — save it for the bake step
 
-## Step 4: Download the BalenaOS Image
+## Step 3: Download BalenaOS via Balena CLI
 
-Download the **development** variant of BalenaOS for Raspberry Pi 5.
-The development image enables local SSH access and serial console logging,
-which are needed for CHI@Edge device enrollment and debugging.
-
-- Version: **6.10.24+rev3** (current as of April 2026)
-- Device type: `raspberrypi5` (64-bit)
-- Variant: **development** (not production)
-
-### Option 1: Download from balena.io (recommended)
-
-1. Go to **https://www.balena.io/os**
-2. Select device type: **Raspberry Pi 5**
-3. Select version: **6.10.24+rev3**
-4. Select edition: **Development**
-5. Download the `.img.gz` file
-
-### Option 2: Download from GitHub releases
-
-BalenaOS releases are published at:
-**https://github.com/balena-os/balena-raspberrypi/releases**
-
-Look for the tag `v6.10.24+rev3` and download the `raspberrypi5`
-development image artifact.
-
-### Option 3: Download via Balena CLI
-
-Install the Balena CLI:
-
-```bash
-# Via npm
-npm install -g balena-cli
-
-# Or download the standalone installer from:
-# https://github.com/balena-io/balena-cli/releases
-```
-
-Download the image (requires a free balena.io account):
+Log in to balena.io:
 
 ```bash
 balena login
-balena os download raspberrypi5 \
-  --version 6.10.24+rev3 \
-  --output balena-raspberrypi5-6.10.24+rev3.img.gz
+# Choose "Web authorization" and follow the browser prompt
 ```
 
-### Extract the image
+List available versions to find the latest:
 
 ```bash
-# If .img.gz
-gunzip balena-raspberrypi5-6.10.24+rev3.img.gz
-
-# If .img.zip
-unzip balena-raspberrypi5-6.10.24+rev3.img.zip
+balena os versions raspberrypi5
+# v6.10.24
+# v6.10.22
+# v6.9.4+rev7
+# ...
 ```
 
-## Step 5: Bake the Image
+Download the BalenaOS **development** image for Pi 5. Append `.dev` to the
+version string to select the development variant:
+
+```bash
+balena os download raspberrypi5 \
+  --version 6.10.24.dev \
+  -o balena-raspberrypi5-6.10.24.dev.img.gz
+```
+
+Notes:
+- The development variant enables local SSH and serial console, which are
+  required for CHI@Edge enrollment and debugging. Production images disable
+  SSH and cannot be enrolled.
+- `-o` is the output flag (short for `--output`)
+- Omit `--version` to download the latest release (production); always
+  specify `.dev` explicitly for the development image
+
+Extract the image (balena flash can also read `.img.gz` directly, but
+baking with chi-edge requires an uncompressed `.img`):
+
+```bash
+gunzip balena-raspberrypi5-6.10.24.dev.img.gz
+# Result: balena-raspberrypi5-6.10.24.dev.img
+```
+
+## Step 4: Bake the Image
 
 Baking injects your device-specific credentials and CHI@Edge registration
-into the image:
+into the image. Use the device UUID returned in Step 2:
 
 ```bash
 chi-edge device bake \
-  --image balena-raspberrypi5-6.10.24+rev3.img \
+  --image balena-raspberrypi5-6.10.24.dev.img \
   DEVICE_UUID
 ```
 
-Replace `DEVICE_UUID` with the UUID returned in Step 3.
+This modifies the image in place — the output file is now personalized for
+your specific device and should not be reused for other devices.
 
-This modifies the image in place — the output is the same file, now
-personalized for your device.
+## Step 5: Flash the Image via Balena CLI
 
-## Step 6: Flash the Image
+Choose the boot media that matches your setup.
 
-The Pi 5 can boot from either **microSD** or **NVME**. Choose the option
-that matches your setup.
+### Option A: Flash to microSD
 
-### Flashing Tools
-
-Use any of these to write the baked image to your target media:
-
-- **[Balena Etcher](https://etcher.balena.io/)** (recommended) — GUI tool
-  for Linux, macOS, and Windows. Download from https://etcher.balena.io/.
-  Handles `.img` and `.img.gz` files directly.
-- **[Raspberry Pi Imager](https://www.raspberrypi.com/software/)** —
-  select "Use custom" to flash the BalenaOS image instead of a stock OS.
-- **`dd`** — command-line option for Linux and macOS (see examples below).
-
-### Option A: Flash to MicroSD
-
-With Balena Etcher: select the baked `.img` file, select your SD card,
-click Flash.
-
-With `dd`:
+Insert the microSD card into your workstation, then:
 
 ```bash
-# Find your SD card device (BE CAREFUL — wrong device = data loss)
-lsblk
+# List available drives to identify the SD card device
+balena util available-drives
 
-# Flash (replace /dev/sdX with your SD card)
-sudo dd if=balena-raspberrypi5-6.10.24+rev3.img of=/dev/sdX bs=4M status=progress
-sync
+# Flash — interactive: balena CLI prompts you to select the drive
+balena local flash balena-raspberrypi5-6.10.24.dev.img
 ```
 
-Insert the microSD card into the Pi 5. If an NVME drive is also installed,
-it is available as secondary storage for dataset recording (see
-[NVME as Data Drive](#nvme-as-data-drive) below).
+Balena CLI lists only removable drives and refuses to overwrite the system
+disk. To specify the drive directly (useful in scripts):
+
+```bash
+balena local flash balena-raspberrypi5-6.10.24.dev.img --drive /dev/sdX --yes
+```
+
+Eject the card when flashing is complete, then insert it into the Pi 5.
 
 ### Option B: Flash to NVME
 
-Booting from NVME gives faster I/O for dataset recording and container
-operations. This requires updating the Pi 5 bootloader first.
+Booting from NVME gives faster I/O for dataset recording. Requires updating
+the Pi 5 bootloader first.
 
-**1. Update the bootloader EEPROM to support NVME boot**
+**1. Update the Pi 5 EEPROM to enable NVME boot**
 
-On a working Pi 5 (booted from microSD with Raspberry Pi OS):
+On a Pi 5 already running Raspberry Pi OS (booted from microSD):
 
 ```bash
-# Update to latest firmware
 sudo rpi-eeprom-update -a
 sudo reboot
-
-# After reboot, edit the boot order
-sudo raspi-config
 ```
 
-Navigate to: **Advanced Options > Boot Order > NVMe/USB Boot**
-
-Or set it directly:
+After reboot, set the NVME-first boot order:
 
 ```bash
-# Edit EEPROM config
 sudo rpi-eeprom-config --edit
 ```
 
-Set the `BOOT_ORDER` line to try NVME first, then SD:
+Set:
 
 ```
 BOOT_ORDER=0xf416
 ```
 
 Boot order digits (right to left): `6`=NVME, `1`=SD, `4`=USB, `f`=restart.
-So `0xf416` tries NVME, then SD, then USB, then retries.
+Save and reboot:
 
 ```bash
-# Apply and reboot
 sudo reboot
 ```
 
-**2. Flash BalenaOS to the NVME drive**
-
-Connect the NVME drive to another machine (via USB-to-NVME adapter) or
-flash while the Pi is booted from microSD:
+**2. Connect the NVME drive to your workstation** (via USB-to-NVME adapter),
+then flash:
 
 ```bash
-# Identify the NVME device
-lsblk
-# Typically /dev/nvme0n1
-
-# Flash (BE CAREFUL — wrong device = data loss)
-sudo dd if=balena-raspberrypi5-6.10.24+rev3.img of=/dev/nvme0n1 bs=4M status=progress
-sync
+balena util available-drives
+balena local flash balena-raspberrypi5-6.10.24.dev.img --drive /dev/nvme0n1 --yes
 ```
 
-**3. Remove the microSD card** (or leave it — the boot order will
-prefer NVME) and power on.
+Remove the microSD (or leave it — the updated boot order prefers NVME)
+and power on the Pi.
 
-## Step 7: Boot and Verify
+## Step 6: Boot and Verify Enrollment
 
-1. Ensure the boot media is inserted (microSD or NVME, per your choice)
-2. Connect Ethernet (required for initial enrollment — Wi-Fi is not
-   supported by BalenaOS on CHI@Edge)
-3. Connect the SO-ARM101 (USB serial) and cameras (USB) if available
+1. Insert boot media (microSD or NVME) into the Pi 5
+2. Connect Ethernet — **Wi-Fi is not supported** by BalenaOS on CHI@Edge
+3. Connect SO-ARM101 (USB serial) and cameras (USB) if available
 4. Power on
 
 The Pi will automatically:
-- Boot BalenaOS from the selected media
+- Boot BalenaOS
 - Download CHI@Edge services
 - Connect via WireGuard to the control plane
 - Self-register as a reservable device
 
-Monitor enrollment from your workstation:
+Monitor enrollment from your workstation (allow 5-10 minutes on first boot):
 
 ```bash
 chi-edge device list
@@ -258,69 +246,10 @@ chi-edge device show soarm101-1
 When health status shows **3/3** and all checks read **STEADY**, the device
 is enrolled and available for reservation.
 
-## Step 8: Verify in the CHI@Edge Portal
-
+Confirm in the portal:
 1. Go to **https://chi.edge.chameleoncloud.org**
 2. Navigate to **Hardware > Devices**
 3. Confirm `soarm101-1` appears with status **enrolled**
-
-## NVME Storage
-
-### NVME as Boot Drive
-
-If you flashed BalenaOS to the NVME (Option B above), the full NVME is
-used by BalenaOS. Container storage and dataset recording will
-automatically use the NVME — no extra configuration needed. This is the
-recommended setup for data collection since NVME is significantly faster
-than microSD for write-heavy workloads like video recording.
-
-### NVME as Data Drive
-
-If you booted from microSD (Option A) and have a separate NVME drive
-installed, it can be mounted inside containers for dataset storage:
-
-```python
-# In Request_LeRobot_SOARM101.ipynb, add a volume mount if needed:
-my_container = Container(
-    ...
-    mounts=["/mnt/nvme:/data"],  # mount NVME inside container
-)
-```
-
-The NVME partition may need to be formatted on first use. You can do this
-via SSH or by running a setup command in the container:
-
-```bash
-# Format (only needed once — destroys existing data)
-sudo mkfs.ext4 /dev/nvme0n1p1
-
-# Mount
-sudo mkdir -p /mnt/nvme
-sudo mount /dev/nvme0n1p1 /mnt/nvme
-```
-
-## Peripheral Access
-
-The SO-ARM101 servos and cameras are exposed to containers via device
-profiles specified at container creation time:
-
-| Profile | Exposes |
-|---------|---------|
-| `pi_serial` | `/dev/ttyACM*`, `/dev/ttyUSB*` — servo controllers |
-| `pi_gpio` | GPIO pins (if needed for additional hardware) |
-| `pi_camera` | Camera devices (`/dev/video*`) |
-
-These are already configured in `Request_LeRobot_SOARM101.ipynb`:
-
-```python
-my_container = Container(
-    ...
-    device_profiles=["pi_serial", "pi_gpio"],
-)
-```
-
-You may need to add `pi_camera` if cameras are not accessible through
-`pi_serial` alone.
 
 ## Optional: Restrict Device Access
 
@@ -330,30 +259,102 @@ Limit which projects can lease your device:
 chi-edge device set --authorized-projects CHI-261589 soarm101-1
 ```
 
+## NVME Storage
+
+### NVME as Boot Drive
+
+If you flashed BalenaOS to NVME (Option B), the full NVME is used by
+BalenaOS. Container storage and dataset recording will automatically use
+NVME — no extra configuration needed. This is the recommended setup for
+data collection since NVME write throughput far exceeds microSD.
+
+### NVME as Data Drive (microSD boot + NVME for data)
+
+Mount the NVME inside containers by adding a volume in your notebook:
+
+```python
+# In Request_LeRobot_SOARM101.ipynb
+my_container = Container(
+    ...
+    mounts=["/mnt/nvme:/data"],
+)
+```
+
+Format the NVME partition on first use (destroys existing data):
+
+```bash
+sudo mkfs.ext4 /dev/nvme0n1p1
+sudo mkdir -p /mnt/nvme
+sudo mount /dev/nvme0n1p1 /mnt/nvme
+```
+
+## Peripheral Access
+
+Devices connected to the Pi are exposed to containers via device profiles:
+
+| Profile | Exposes |
+|---------|---------|
+| `pi_serial` | `/dev/ttyACM*`, `/dev/ttyUSB*` — servo controllers |
+| `pi_gpio` | GPIO pins |
+| `pi_camera` | `/dev/video*` — cameras |
+
+Configure in `Request_LeRobot_SOARM101.ipynb`:
+
+```python
+my_container = Container(
+    ...
+    device_profiles=["pi_serial", "pi_gpio", "pi_camera"],
+)
+```
+
 ## Troubleshooting
 
-### Device not showing as enrolled
+### `balena os download` fails with "Unauthorized"
 
-- Ensure Ethernet is connected — BalenaOS requires wired networking
-- Wait 5-10 minutes after first boot for services to download
-- Check `chi-edge device show soarm101-1` for partial health checks
+```bash
+balena login
+# Re-authenticate via browser, then retry the download
+```
+
+### `balena local flash` fails with "EACCES"
+
+```bash
+# Run with sudo if your user lacks raw disk access
+sudo balena local flash balena-raspberrypi5-6.10.24.dev.img
+```
+
+### Device not appearing in `chi-edge device list`
+
+- Confirm Ethernet is connected — BalenaOS does not support Wi-Fi on CHI@Edge
+- Wait 5-10 minutes on first boot for services to download
+- Run `chi-edge device show soarm101-1` to see partial health check progress
 
 ### Health checks stuck at 1/3 or 2/3
 
-- The device may still be downloading container images
-- Reboot the Pi and wait another 5 minutes
-- Check that outbound internet access is available (no firewall blocking
-  WireGuard or Docker Hub)
+- The device is still downloading container images — wait another 5 minutes
+- Verify outbound internet access (WireGuard and Docker Hub must be reachable)
+- Reboot the Pi and re-check
 
-### Wrong BalenaOS version
+### Wrong image / architecture or variant
 
 - Confirm the image is for `raspberrypi5` (not `raspberrypi4-64`)
-- Confirm version is **6.10.24+rev3** or the latest available
+- Confirm you downloaded the `.dev` variant — production images have SSH
+  disabled and cannot complete CHI@Edge enrollment
+- Verify available versions: `balena os versions raspberrypi5`
+- Development version syntax: `6.10.24.dev` (append `.dev`, no `+rev` suffix)
 
 ### Application credential expired
 
-- Credentials can expire. If `chi-edge` commands fail with auth errors,
-  create a new credential in the portal and re-source the RC file
+If `chi-edge` commands fail with auth errors, create a new credential at
+`https://chi.edge.chameleoncloud.org/identity/application_credentials/`,
+download the new RC file, and re-source it.
+
+### PyTorch CUDA not available on MI100 (cloud training)
+
+```bash
+pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/rocm6.3
+python -c "import torch; print(torch.cuda.is_available())"  # True on ROCm
+```
 
 ## Next Steps
 
@@ -362,5 +363,5 @@ Once the device is enrolled and healthy:
 1. Open `Request_LeRobot_SOARM101.ipynb` on Chameleon JupyterHub
 2. Set `DEVICE_NAME = "soarm101-1"`
 3. Run through the notebook to lease the device, launch the LeRobot
-   container, and start collecting demonstration episodes
+   container, and collect demonstration episodes
 4. See [README.md](../README.md) for the full edge-to-cloud pipeline

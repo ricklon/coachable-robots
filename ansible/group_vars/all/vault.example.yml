@@ -1,0 +1,15 @@
+---
+# group_vars/all/vault.example.yml
+# Copy this to vault.yml, fill in real secrets, then encrypt.
+#
+#   cp ansible/group_vars/all/vault.example.yml ansible/group_vars/all/vault.yml
+#   ansible-vault encrypt ansible/group_vars/all/vault.yml
+#
+# Once encrypted, vault.yml is safe to commit to your private fork.
+# View/edit later with:
+#   ansible-vault view ansible/group_vars/all/vault.yml
+#   ansible-vault edit ansible/group_vars/all/vault.yml
+
+vault_hf_token: "hf_REPLACE_ME"
+vault_chi_credential_id: "REPLACE_ME"
+vault_chi_credential_secret: "REPLACE_ME"
