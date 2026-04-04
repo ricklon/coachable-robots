@@ -32,7 +32,7 @@ The project serves dual purposes: a functional robotics training pipeline and a 
 
 - **Robot**: SO-ARM101, 6-DOF, Feetech STS3215 servos
 - **Teleoperation**: xbox_soarm_teleop (sibling repo) with Xbox controller IK
-- **Training Framework**: LeRobot v0.4.1 (HuggingFace)
+- **Training Framework**: LeRobot v0.5.0 (HuggingFace)
 - **Cloud**: Chameleon Cloud, CHI@TACC, MI100 bare-metal nodes
 - **Cloud API**: python-chi 1.0+ (NOT the deprecated pre-1.0 functions)
 - **GPU**: AMD Instinct MI100 (gfx908, CDNA1, 32 GB HBM2)
@@ -41,7 +41,7 @@ The project serves dual purposes: a functional robotics training pipeline and a 
 - **Data Transfer**: HuggingFace Hub (datasets and checkpoints)
 - **Edge Container**: Docker on Raspberry Pi 5 (CPU-only PyTorch)
 - **Notebook**: Jupyter on Chameleon JupyterHub
-- **Python**: 3.10 (LeRobot requirement)
+- **Python**: 3.12 (LeRobot v0.5.0 requirement)
 
 ## Project Structure
 
@@ -188,8 +188,8 @@ lerobot-record \
 1. **Collect**: Pi runs `lerobot-record` with Xbox teleop → episodes saved locally
 2. **Push**: `--dataset.push_to_hub=true` uploads to HuggingFace Hub
 3. **Train**: MI100 node pulls dataset by `repo_id`, trains policy, saves checkpoints
-4. **Upload**: `huggingface-cli upload` pushes checkpoint to HF Hub
-5. **Fetch**: Pi runs `huggingface-cli download` to pull trained policy
+4. **Upload**: `hf upload` pushes checkpoint to HF Hub
+5. **Fetch**: Pi runs `hf download` to pull trained policy
 6. **Deploy**: Pi runs `lerobot-record --policy.path=...` for autonomous execution
 
 HuggingFace Hub is the transfer layer — no custom transfer code, no Chameleon Object Store needed for runtime data (Object Store is for Trovi experiment packaging).
@@ -209,7 +209,7 @@ Benchmark results are JSON files in `bench/results/` with device name, PyTorch v
 
 ## Docker Conventions (Pi Edge)
 
-- Base image: `python:3.10-slim-bookworm`
+- Base image: `python:3.12-slim-bookworm`
 - PyTorch: CPU-only wheels (`--index-url .../whl/cpu`)
 - Must run with `--privileged -v /dev:/dev` for camera and serial passthrough
 - HF token passed as environment variable, never baked into image
@@ -250,7 +250,7 @@ This project frames imitation learning as "coaching" — students show the robot
 
 - Jupyter notebooks for orchestration and experimentation
 - Ansible for infrastructure provisioning (not bash scripts over SSH)
-- Python 3.10 (LeRobot constraint)
+- Python 3.12 (LeRobot v0.5.0 requirement)
 - Markdown for all documentation (not docx unless explicitly requested)
 - `pyproject.toml` for Python projects (uv as package manager where applicable)
 - Ruff for linting/formatting
