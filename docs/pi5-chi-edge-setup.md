@@ -68,13 +68,58 @@ Notes:
 
 ## Step 4: Download the BalenaOS Image
 
-Download the BalenaOS image for `raspberrypi5`:
-- Version: **6.10.24+rev3** (current as of April 2026)
-- Must be the 64-bit variant
+Download the **development** variant of BalenaOS for Raspberry Pi 5.
+The development image enables local SSH access and serial console logging,
+which are needed for CHI@Edge device enrollment and debugging.
 
-Unzip after downloading:
+- Version: **6.10.24+rev3** (current as of April 2026)
+- Device type: `raspberrypi5` (64-bit)
+- Variant: **development** (not production)
+
+### Option 1: Download from balena.io (recommended)
+
+1. Go to **https://www.balena.io/os**
+2. Select device type: **Raspberry Pi 5**
+3. Select version: **6.10.24+rev3**
+4. Select edition: **Development**
+5. Download the `.img.gz` file
+
+### Option 2: Download from GitHub releases
+
+BalenaOS releases are published at:
+**https://github.com/balena-os/balena-raspberrypi/releases**
+
+Look for the tag `v6.10.24+rev3` and download the `raspberrypi5`
+development image artifact.
+
+### Option 3: Download via Balena CLI
+
+Install the Balena CLI:
 
 ```bash
+# Via npm
+npm install -g balena-cli
+
+# Or download the standalone installer from:
+# https://github.com/balena-io/balena-cli/releases
+```
+
+Download the image (requires a free balena.io account):
+
+```bash
+balena login
+balena os download raspberrypi5 \
+  --version 6.10.24+rev3 \
+  --output balena-raspberrypi5-6.10.24+rev3.img.gz
+```
+
+### Extract the image
+
+```bash
+# If .img.gz
+gunzip balena-raspberrypi5-6.10.24+rev3.img.gz
+
+# If .img.zip
 unzip balena-raspberrypi5-6.10.24+rev3.img.zip
 ```
 
@@ -99,9 +144,23 @@ personalized for your device.
 The Pi 5 can boot from either **microSD** or **NVME**. Choose the option
 that matches your setup.
 
+### Flashing Tools
+
+Use any of these to write the baked image to your target media:
+
+- **[Balena Etcher](https://etcher.balena.io/)** (recommended) — GUI tool
+  for Linux, macOS, and Windows. Download from https://etcher.balena.io/.
+  Handles `.img` and `.img.gz` files directly.
+- **[Raspberry Pi Imager](https://www.raspberrypi.com/software/)** —
+  select "Use custom" to flash the BalenaOS image instead of a stock OS.
+- **`dd`** — command-line option for Linux and macOS (see examples below).
+
 ### Option A: Flash to MicroSD
 
-Use [Balena Etcher](https://etcher.balena.io/) or `dd`:
+With Balena Etcher: select the baked `.img` file, select your SD card,
+click Flash.
+
+With `dd`:
 
 ```bash
 # Find your SD card device (BE CAREFUL — wrong device = data loss)
