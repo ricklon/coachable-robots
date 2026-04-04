@@ -190,8 +190,9 @@ cython_debug/
 
 # Ansible — instance files (gitignored; use .example versions as templates)
 ansible/.vault_pass
+ansible/*-openrc.sh
 ansible/group_vars/all/vars.yml
-ansible/group_vars/all/vault.yml
+# vault.yml is safe to commit once encrypted with ansible-vault
 
 # Ruff stuff:
 .ruff_cache/
