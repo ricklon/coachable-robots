@@ -147,9 +147,80 @@ Then open `CoachableRobots_v3.ipynb` and update the `# CONFIGURE:` cells.
 
 ## Step 7: Run the pipeline
 
-1. **Collect**: Pi runs `lerobot-record` via Xbox controller → HuggingFace Hub
-2. **Train**: Run `CoachableRobots_v3.ipynb` on Chameleon JupyterHub
-3. **Deploy**: Pi fetches checkpoint → autonomous inference
+The pipeline uses two notebooks with distinct roles:
+
+| Notebook | Purpose | Run when |
+|----------|---------|----------|
+| `CoachableRobots_v3.ipynb` | Provision MI100 cloud node + train | Once per training session |
+| `Request_LeRobot_SOARM101.ipynb` | Lease Pi, launch container, collect demos | Each work session |
+
+---
+
+### CoachableRobots_v3.ipynb — Cloud Training Setup
+
+Open on **Chameleon JupyterHub** and run cells top to bottom.
+
+**Part 1 — Lease and Server** (~5 min, or instant if reusing)
+- Checks for an existing `coachable-robots-mi100` lease and reuses it
+- Lists available MI100 nodes before creating anything
+- Prompts for confirmation before creating a new lease
+- Expected output: `REUSING lease ...` or `Lease ACTIVE: <id>`
+
+**Part 2 — Ansible Provisioning** (~20 min first run, ~2 min on re-runs)
+- Generates `ansible/inventory.ini` from the floating IP
+- Runs `setup_training_node.yml` — installs ROCm 6.3, Miniconda, PyTorch, LeRobot
+- Idempotent: skips steps already completed
+- Expected output: `Playbook completed successfully`
+
+**Part 4 — Training** (after demos are collected and pushed to HF Hub)
+- Set `HF_USER` and `DATASET` at the top of the cell
+- Launches `lerobot-train` on the MI100 via SSH
+- Expected output: training loss logs (runs in foreground; use tmux for long runs)
+
+**Part 6 — Cleanup** (when done)
+- Type `yes` at the prompt to delete server and release the lease
+- Expected output: `Cleanup complete.`
+
+---
+
+### Request_LeRobot_SOARM101.ipynb — Edge Device
+
+Open on **Chameleon JupyterHub** and run cells top to bottom each session.
+
+**Setup cell**
+- Sets site to `CHI@Edge` and project to `CHI-261589`
+- No output expected; errors here mean auth is not configured
+
+**Lease cell**
+- Reuses `lerobot-soarm101-lease` if active, creates a 7-day lease if not
+- Expected output: `Reusing lease ... ACTIVE` or `Lease ACTIVE`
+
+**Container cell**
+- Deletes any stale/errored container automatically, then creates fresh
+- Pulls `rianders/lerobot-soarm101:latest` from Docker Hub (~1-2 min)
+- Uses `pi_camera` device profile for webcam access
+- Expected output: `Container 'lerobot-soarm101-container' is Running`
+
+**Floating IP cell**
+- Assigns a public IP if not already attached
+- Expected output: `Public IP: <ip>` and SSH command
+
+**Verify cells**
+- `ls /dev/video*` — should show `/dev/video0` (C920e webcam)
+- `v4l2-ctl --info` — shows camera capabilities
+- **Camera capture cell** — takes a test frame and displays it inline in the notebook
+  - Expected output: a 1280×720 image from the C920e
+  - If this fails: check the Pi is powered, camera is plugged in, `pi_camera` profile is set
+
+**Data collection** *(pending dual-serial helpdesk response)*
+- Requires custom device profile exposing both `ttyACM0` and `ttyACM1`
+- Until then: run `bash scripts/collect_demos.sh` locally on the Pi with `--privileged`
+
+**Cleanup cell** (optional — lease persists 7 days)
+- Prompts for confirmation before deleting the container
+- Lease is not deleted automatically; uncomment `my_lease.delete()` to release early
+
+---
 
 See [README.md](README.md) for the full architecture and data flow.
 
