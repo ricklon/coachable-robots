@@ -49,6 +49,17 @@ On the Pi, the container runtime CLI is `balena`, not `docker`. All `docker run`
 ### `python -m lerobot.scripts.control_robot` replaced by `lerobot-calibrate`
 The old calibration command was `python -m lerobot.scripts.control_robot --control.type=calibrate`. v0.5.0 ships a `lerobot-calibrate` CLI entry point instead.
 
+### Leader arm uses `--teleop.type`, follower uses `--robot.type` in `lerobot-calibrate`
+**Problem:** Passing `--robot.type=so101_leader` fails — `so101_leader` is not a valid robot type.  
+**Fix:** Leader is a teleop device, follower is a robot device:
+```bash
+# Leader:
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyACM0
+
+# Follower:
+lerobot-calibrate --robot.type=so101_follower --robot.port=/dev/ttyACM1
+```
+
 ---
 
 ## CHI@Edge Device Profiles

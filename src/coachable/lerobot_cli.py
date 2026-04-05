@@ -16,23 +16,32 @@ from pathlib import Path
 from coachable.fleet import Robot
 
 
-def calibrate(robot: Robot) -> subprocess.CompletedProcess:
-    """Calibrate both leader and follower arms for a robot station."""
-    results = []
-    for arm_type, port, arm_id in [
-        ("so101_leader", robot.leader_port, f"{robot.name}_leader"),
-        ("so101_follower", robot.follower_port, f"{robot.name}_follower"),
-    ]:
-        cmd = [
-            "lerobot-calibrate",
-            f"--robot.type={arm_type}",
-            f"--robot.port={port}",
-            f"--robot.id={arm_id}",
-        ]
-        print(f"Calibrating {arm_type} on {port}...")
-        result = subprocess.run(cmd, check=True)
-        results.append(result)
-    return results[-1]
+def calibrate(robot: Robot) -> None:
+    """Calibrate both leader and follower arms for a robot station.
+
+    In lerobot v0.5.0:
+    - Leader arm is a teleop device: --teleop.type=so101_leader
+    - Follower arm is a robot device: --robot.type=so101_follower
+    """
+    # Calibrate leader (teleop)
+    cmd = [
+        "lerobot-calibrate",
+        f"--teleop.type=so101_leader",
+        f"--teleop.port={robot.leader_port}",
+        f"--teleop.id={robot.name}_leader",
+    ]
+    print(f"Calibrating leader (so101_leader) on {robot.leader_port}...")
+    subprocess.run(cmd, check=True)
+
+    # Calibrate follower (robot)
+    cmd = [
+        "lerobot-calibrate",
+        f"--robot.type=so101_follower",
+        f"--robot.port={robot.follower_port}",
+        f"--robot.id={robot.name}_follower",
+    ]
+    print(f"Calibrating follower (so101_follower) on {robot.follower_port}...")
+    subprocess.run(cmd, check=True)
 
 
 def record(
