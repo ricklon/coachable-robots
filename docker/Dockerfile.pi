@@ -1,11 +1,33 @@
 # Dockerfile.pi — Raspberry Pi 5 edge collector for SO-ARM101
-# Build: docker buildx build --platform linux/arm64 -t rianders/lerobot-soarm101:main -f docker/Dockerfile.pi .
-# Run:  docker run -it --privileged -v /dev:/dev -v $(pwd)/data:/app/data \
-#         -e HF_TOKEN=hf_xxx -e HF_USER=ricklon rianders/lerobot-soarm101:main
+#
+# Hardware:
+#   - SO-ARM101 leader arm  (Feetech STS3215, /dev/ttyACM0)
+#   - SO-ARM101 follower arm (Feetech STS3215, /dev/ttyACM1)
+#   - Logitech C920e USB webcam (/dev/video0)
+#
+# CHI@Edge container — device profiles required (no --privileged):
+#   device_profiles=["pi_serial", "pi_camera"]
+#
+# NOTE: pi_serial only exposes /dev/ttyACM0. Using both leader and follower
+# requires a custom device profile — submit a helpdesk request at:
+#   https://chameleoncloud.org/user/help/
+# Request: "custom pi_serial profile exposing /dev/ttyACM0 and /dev/ttyACM1"
+#
+# Build (on Pi or with buildx for arm64):
+#   docker build -t rianders/lerobot-soarm101:latest -f docker/Dockerfile.pi .
+#
+# Run locally (full device access for testing):
+#   docker run -it --privileged -v /dev:/dev \
+#     -v $(pwd)/data:/app/data \
+#     -e HF_TOKEN=hf_xxx -e HF_USER=rianders \
+#     rianders/lerobot-soarm101:latest
+#
+# Run on CHI@Edge (via python-chi Container API — no privileged):
+#   device_profiles=["pi_serial", "pi_camera"]
 
-FROM python:3.12-slim-bookworm
+FROM arm64v8/python:3.12-slim-bookworm
 
-# System deps: USB serial, cameras, video encoding
+# System deps: USB serial, V4L2 cameras, video encoding
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ffmpeg \
@@ -14,12 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     usbutils \
     v4l-utils \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
 # CPU-only PyTorch (Pi 5 has no GPU)
-RUN pip install --no-cache-dir \
+RUN uv pip install --system --no-cache \
     torch torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/cpu
 
@@ -27,25 +54,23 @@ RUN pip install --no-cache-dir \
 RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
     && cd /app/lerobot \
     && git checkout v0.5.0 \
-    && pip install --no-cache-dir -e '.[feetech]'
-
-# Xbox controller teleoperation + IK
-RUN git clone https://github.com/ricklon/xbox_soarm_teleop.git /app/xbox_soarm_teleop \
-    && cd /app/xbox_soarm_teleop \
-    && pip install --no-cache-dir -e '.'
+    && uv pip install --system --no-cache -e '.[feetech]'
 
 # HuggingFace CLI for dataset push/pull
-RUN pip install --no-cache-dir "huggingface-hub[hf_xet,cli]"
+RUN uv pip install --system --no-cache "huggingface-hub[hf_xet,cli]"
 
 # Entrypoint scripts
 COPY docker/scripts/ /app/scripts/
 RUN chmod +x /app/scripts/*.sh
 
-# Calibration files persist here — mount a volume to keep them across containers
+# Calibration and data dirs — mount volumes to persist across containers
 RUN mkdir -p /app/calibration /app/data /app/checkpoints
 
 ENV HF_TOKEN=""
 ENV HF_USER=""
 ENV LEROBOT_HOME="/app"
+ENV LEADER_PORT="/dev/ttyACM0"
+ENV FOLLOWER_PORT="/dev/ttyACM1"
+ENV CAMERA_INDEX="0"
 
 CMD ["/bin/bash"]

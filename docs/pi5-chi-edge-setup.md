@@ -327,20 +327,50 @@ sudo mount /dev/nvme0n1p1 /mnt/nvme
 
 ## Peripheral Access
 
-Devices connected to the Pi are exposed to containers via device profiles:
+CHI@Edge does **not** support privileged containers. Hardware access is
+granted exclusively via device profiles — there is no `--privileged` or
+`-v /dev:/dev` equivalent. Profiles are specified at container launch time.
 
 | Profile | Exposes |
 |---------|---------|
-| `pi_serial` | `/dev/ttyACM*`, `/dev/ttyUSB*` — servo controllers |
-| `pi_gpio` | GPIO pins |
-| `pi_camera` | `/dev/video*` — cameras |
+| `pi_serial` | `/dev/ttyACM0` only — servo/USB serial |
+| `pi_camera` | `/dev/video0`–`video23` — USB and CSI cameras |
+| `pi_gpio` | GPIO, I2C (`/dev/gpiomem`, `/dev/i2c-1`) |
 
-Configure in `Request_LeRobot_SOARM101.ipynb`:
+### SO-ARM101 Two-Arm Constraint
+
+The `pi_serial` profile only exposes `/dev/ttyACM0`. The SO-ARM101 setup
+requires **two serial ports** — leader on `ttyACM0`, follower on `ttyACM1`.
+
+**Action required:** Submit a helpdesk request at
+https://chameleoncloud.org/user/help/ asking for a custom device profile
+that exposes both `/dev/ttyACM0` and `/dev/ttyACM1`. Reference device
+`soarm101-1` and project `CHI-261589`.
+
+Until the custom profile is available, testing can be done by SSHing into
+the container and manually remapping ports, or by running the container
+locally on the Pi with `--privileged`.
+
+### Logitech C920e USB Webcam
+
+The C920e is a standard UVC device and appears on `/dev/video0`. It is
+fully covered by the `pi_camera` profile — no special configuration needed.
+
+### Container launch (python-chi)
 
 ```python
 my_container = Container(
-    ...
-    device_profiles=["pi_serial", "pi_gpio", "pi_camera"],
+    "soarm101-lerobot",
+    image_ref="rianders/lerobot-soarm101:latest",
+    reservation_id=reservation_id,
+    environment={
+        "HF_TOKEN": "hf_xxx",
+        "HF_USER": "rianders",
+        "LEADER_PORT": "/dev/ttyACM0",
+        "FOLLOWER_PORT": "/dev/ttyACM1",
+        "CAMERA_INDEX": "0",
+    },
+    device_profiles=["pi_serial", "pi_camera"],
 )
 ```
 
