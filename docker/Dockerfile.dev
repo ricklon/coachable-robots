@@ -1,0 +1,75 @@
+# Dockerfile.dev — Local development container for SO-ARM101 pipeline testing
+#
+# Runs on x86_64 Linux/macOS for local development and testing without Pi hardware.
+# Uses simulated robots (gym-aloha) when arms are not connected, and can use
+# a real USB webcam (Logitech C920e) when available.
+#
+# Build:
+#   docker build -t rianders/lerobot-soarm101-dev:latest -f docker/Dockerfile.dev .
+#
+# Run with simulated arms + real webcam:
+#   docker run -it --privileged -v /dev:/dev \
+#     -v $(pwd)/data:/app/data \
+#     -e HF_TOKEN=hf_xxx -e HF_USER=rianders \
+#     -e USE_SIM=1 \
+#     rianders/lerobot-soarm101-dev:latest
+#
+# Run with real arms connected to laptop:
+#   docker run -it --privileged -v /dev:/dev \
+#     -v $(pwd)/data:/app/data \
+#     -e HF_TOKEN=hf_xxx -e HF_USER=rianders \
+#     rianders/lerobot-soarm101-dev:latest
+
+FROM python:3.12-slim-bookworm
+
+# System deps: USB serial, V4L2 cameras, video encoding, sim display
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libusb-1.0-0 \
+    usbutils \
+    v4l-utils \
+    curl \
+    # For gym simulation rendering
+    libglfw3 \
+    libglew-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# CPU-only PyTorch (swap index URL for CUDA if GPU available on laptop)
+RUN uv pip install --system --no-cache \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# LeRobot v0.5.0 with Feetech servos + simulation environments
+RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
+    && cd /app/lerobot \
+    && git checkout v0.5.0 \
+    && uv pip install --system --no-cache -e '.[feetech,aloha,pusht]'
+
+# HuggingFace CLI for dataset push/pull
+RUN uv pip install --system --no-cache "huggingface-hub[hf_xet,cli]"
+
+# Entrypoint scripts (shared with Dockerfile.pi)
+COPY docker/scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+RUN mkdir -p /app/calibration /app/data /app/checkpoints
+
+ENV HF_TOKEN=""
+ENV HF_USER=""
+ENV LEROBOT_HOME="/app"
+ENV LEADER_PORT="/dev/ttyACM0"
+ENV FOLLOWER_PORT="/dev/ttyACM1"
+ENV CAMERA_INDEX="0"
+# Set USE_SIM=1 to use gym-aloha instead of real arms
+ENV USE_SIM="0"
+
+CMD ["/bin/bash"]
