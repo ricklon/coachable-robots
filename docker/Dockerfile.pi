@@ -1,0 +1,51 @@
+# Dockerfile.pi — Raspberry Pi 5 edge collector for SO-ARM101
+# Build: docker buildx build --platform linux/arm64 -t rianders/lerobot-soarm101:main -f docker/Dockerfile.pi .
+# Run:  docker run -it --privileged -v /dev:/dev -v $(pwd)/data:/app/data \
+#         -e HF_TOKEN=hf_xxx -e HF_USER=ricklon rianders/lerobot-soarm101:main
+
+FROM python:3.12-slim-bookworm
+
+# System deps: USB serial, cameras, video encoding
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libusb-1.0-0 \
+    usbutils \
+    v4l-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# CPU-only PyTorch (Pi 5 has no GPU)
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# LeRobot v0.5.0 with Feetech servo support (SO-ARM101 uses STS3215)
+RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
+    && cd /app/lerobot \
+    && git checkout v0.5.0 \
+    && pip install --no-cache-dir -e '.[feetech]'
+
+# Xbox controller teleoperation + IK
+RUN git clone https://github.com/ricklon/xbox_soarm_teleop.git /app/xbox_soarm_teleop \
+    && cd /app/xbox_soarm_teleop \
+    && pip install --no-cache-dir -e '.'
+
+# HuggingFace CLI for dataset push/pull
+RUN pip install --no-cache-dir "huggingface-hub[hf_xet,cli]"
+
+# Entrypoint scripts
+COPY docker/scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+# Calibration files persist here — mount a volume to keep them across containers
+RUN mkdir -p /app/calibration /app/data /app/checkpoints
+
+ENV HF_TOKEN=""
+ENV HF_USER=""
+ENV LEROBOT_HOME="/app"
+
+CMD ["/bin/bash"]

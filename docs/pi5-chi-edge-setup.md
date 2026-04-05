@@ -279,13 +279,22 @@ Confirm in the portal:
 2. Navigate to **Hardware > Devices**
 3. Confirm `soarm101-1` appears with status **enrolled**
 
-## Step 8: Restrict Device Access (Optional)
+## Step 8: Restrict Device Access
 
-Limit which projects can lease your device:
+Newly enrolled devices are available to **all** Chameleon projects by default.
+Limit leasing to your project only:
 
 ```bash
 chi-edge device set --authorized-projects CHI-261589 soarm101-1
 ```
+
+Verify the change:
+
+```bash
+chi-edge device show soarm101-1
+```
+
+The `authorized_projects` field should list only `CHI-261589`.
 
 ## NVME Storage
 
@@ -392,4 +401,7 @@ Once the device is enrolled and healthy:
 2. Set `DEVICE_NAME = "soarm101-1"`
 3. Run through the notebook to lease the device, launch the LeRobot
    container, and collect demonstration episodes
+
+> **Note:** CHI@Edge maximum lease duration is **7 days**. Renew before
+> expiry to avoid losing access to the device mid-experiment.
 4. See [README.md](../README.md) for the full edge-to-cloud pipeline
