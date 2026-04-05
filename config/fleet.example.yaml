@@ -1,0 +1,48 @@
+# fleet.example.yaml — Reference fleet configuration
+#
+# Copy to fleet.yaml and edit for your lab setup.
+# fleet.yaml is gitignored — never commit real station assignments.
+#
+# Usage:
+#   coachable fleet --list
+#   coachable preview --robot alpha
+#   coachable collect --robot alpha --dataset pick_block --episodes 20
+
+fleet:
+  name: coachable-lab-01
+
+  robots:
+    - name: alpha                    # short slug used in --robot flag
+      type: so101                    # robot type (so101, car, etc.)
+      leader_port: /dev/ttyACM0
+      follower_port: /dev/ttyACM1
+      camera_index: 0                # /dev/video0
+      coach: alice                   # name of assigned coach (from coaches list)
+      status: available              # available | in_use | offline
+
+    - name: beta
+      type: so101
+      leader_port: /dev/ttyACM2
+      follower_port: /dev/ttyACM3
+      camera_index: 2
+      coach: null                    # unassigned
+      status: available
+
+# Coaches can be students, instructors, or agents
+coaches:
+  - name: alice
+    hf_user: rianders                # HuggingFace username for dataset/model repos
+    role: student                    # student | instructor | agent
+
+  - name: bob
+    hf_user: bobsmith
+    role: student
+
+  - name: coach-agent-01
+    hf_user: coachable-lab
+    role: agent                      # autonomous coach — same workflow as a student
+
+hf:
+  org: coachable-lab                 # HF org or username
+  dataset_prefix: soarm101           # dataset repos: {hf_user}/{prefix}-{task}
+  model_prefix: act                  # model repos:   {hf_user}/{prefix}-{task}

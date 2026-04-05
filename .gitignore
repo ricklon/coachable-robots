@@ -194,6 +194,9 @@ ansible/*-openrc.sh
 ansible/group_vars/all/vars.yml
 # vault.yml is safe to commit once encrypted with ansible-vault
 
+# Fleet config — contains real station assignments and coach names
+config/fleet.yaml
+
 # Ruff stuff:
 .ruff_cache/
 

@@ -60,19 +60,27 @@ RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
 # HuggingFace CLI for dataset push/pull
 RUN uv pip install --system --no-cache "huggingface-hub[hf_xet,cli]"
 
-# Entrypoint scripts (shared with Dockerfile.pi)
-COPY docker/scripts/ /app/scripts/
-RUN chmod +x /app/scripts/*.sh
+# Install coachable package (fleet management + coaching CLI)
+COPY pyproject.toml README.md /app/coachable-robots/
+COPY src/ /app/coachable-robots/src/
+RUN uv pip install --system --no-cache -e /app/coachable-robots
 
+# Legacy entrypoint scripts (kept for reference during transition)
+COPY docker/scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.sh 2>/dev/null || true
+
+# Fleet config — override at runtime with -v /path/to/fleet.yaml:/app/config/fleet.yaml
+COPY config/fleet.example.yaml /app/config/fleet.yaml
 RUN mkdir -p /app/calibration /app/data /app/checkpoints
 
 ENV HF_TOKEN=""
 ENV HF_USER=""
 ENV HF_LEROBOT_HOME="/app"
+ENV FLEET_CONFIG="/app/config/fleet.yaml"
 ENV LEADER_PORT="/dev/ttyACM0"
 ENV FOLLOWER_PORT="/dev/ttyACM1"
 ENV CAMERA_INDEX="0"
-# Set USE_SIM=1 to use gym-aloha instead of real arms
+# Set USE_SIM=1 for pipeline dry-run without hardware
 ENV USE_SIM="0"
 # Headless MuJoCo rendering (no display required)
 ENV MUJOCO_GL="egl"
