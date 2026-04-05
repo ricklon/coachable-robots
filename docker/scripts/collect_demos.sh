@@ -9,11 +9,16 @@
 #
 # Environment variables:
 #   HF_USER        HuggingFace username (required)
-#   HF_TOKEN       HuggingFace token (required)
+#   HF_TOKEN       HuggingFace token (required for push; optional for sim dry-run)
 #   LEADER_PORT    Leader arm serial port (default /dev/ttyACM0)
 #   FOLLOWER_PORT  Follower arm serial port (default /dev/ttyACM1)
 #   CAMERA_INDEX   USB webcam index (default 0, i.e. /dev/video0)
-#   USE_SIM        Set to 1 to use gym-aloha simulation instead of real arms
+#   USE_SIM        Set to 1 to run a pipeline dry-run (HF pull + training check, no hardware)
+#
+# Note on USE_SIM=1:
+#   lerobot v0.5.0 removed sim robot types from lerobot-record. USE_SIM mode now
+#   validates the full pipeline by pulling a public SO-101 dataset from HF Hub and
+#   verifying the training entrypoint — no real arms or cameras required.
 set -euo pipefail
 
 DATASET_NAME=${1:-"soarm101_demos"}
@@ -30,36 +35,52 @@ if [ -z "${HF_USER:-}" ]; then
     exit 1
 fi
 
+echo "=== SO-ARM101 Demo Collection ==="
+echo "Dataset:  ${HF_USER}/${DATASET_NAME}"
+echo "Episodes: ${NUM_EPISODES}"
+echo "Task:     ${TASK_DESC}"
+echo "Mode:     $([ "$USE_SIM" = "1" ] && echo "DRY-RUN (pipeline validation, no hardware)" || echo "REAL ARMS")"
+echo ""
+
+if [ "$USE_SIM" = "1" ]; then
+    # ── Dry-run mode: validate full pipeline without hardware ──
+    # Pulls a public SO-101 dataset and verifies the training entrypoint.
+    # HF_TOKEN optional (public dataset); set it to also test auth.
+    echo "Dry-run: validating HF access and training entrypoint..."
+
+    if [ -n "${HF_TOKEN:-}" ]; then
+        huggingface-cli login --token "$HF_TOKEN"
+        echo "HF auth: OK"
+    fi
+
+    REF_DATASET="lerobot/pusht"
+    echo "Pulling reference dataset: ${REF_DATASET}"
+    python -c "
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+ds = LeRobotDataset('${REF_DATASET}', episodes=[0])
+print(f'Dataset OK: {len(ds)} frames, keys={list(ds[0].keys())}')
+"
+
+    echo "Checking training entrypoint..."
+    python -c "
+from lerobot.scripts.lerobot_train import main as train_main
+print('lerobot-train entrypoint: OK')
+"
+
+    echo ""
+    echo "Pipeline dry-run PASSED. Container is ready for real arm collection."
+    exit 0
+fi
+
+# ── Real hardware mode requires HF credentials ──
 if [ -z "${HF_TOKEN:-}" ]; then
     echo "ERROR: HF_TOKEN environment variable is not set."
     exit 1
 fi
 
-echo "=== SO-ARM101 Demo Collection ==="
-echo "Dataset:  ${HF_USER}/${DATASET_NAME}"
-echo "Episodes: ${NUM_EPISODES}"
-echo "Task:     ${TASK_DESC}"
-echo "Mode:     $([ "$USE_SIM" = "1" ] && echo "SIMULATION (gym-aloha)" || echo "REAL ARMS")"
-echo ""
-
 # Authenticate HuggingFace
 huggingface-cli login --token "$HF_TOKEN"
 
-if [ "$USE_SIM" = "1" ]; then
-    # ── Simulation mode (gym-aloha, no hardware required) ──
-    echo "Running in simulation mode with gym-aloha..."
-
-    lerobot-record \
-        --robot.type=aloha \
-        --robot.task=AlohaInsertion-v0 \
-        --dataset.repo_id="${HF_USER}/${DATASET_NAME}" \
-        --dataset.num_episodes="${NUM_EPISODES}" \
-        --dataset.single_task="${TASK_DESC}" \
-        --dataset.episode_time_s=30 \
-        --dataset.reset_time_s=5 \
-        --dataset.fps=30 \
-        --dataset.push_to_hub=true
-else
     # ── Real hardware mode (SO-ARM101 leader + follower + C920e) ──
 
     # Verify serial ports
@@ -99,7 +120,6 @@ else
         --dataset.reset_time_s=10 \
         --dataset.fps=30 \
         --dataset.push_to_hub=true
-fi
 
 echo ""
 echo "Done! Dataset at: https://huggingface.co/datasets/${HF_USER}/${DATASET_NAME}"

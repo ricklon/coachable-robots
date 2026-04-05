@@ -35,6 +35,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # For gym simulation rendering
     libglfw3 \
     libglew-dev \
+    # build-essential + linux-libc-dev needed to build evdev (pynput dep of lerobot)
+    build-essential \
+    linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -65,11 +68,13 @@ RUN mkdir -p /app/calibration /app/data /app/checkpoints
 
 ENV HF_TOKEN=""
 ENV HF_USER=""
-ENV LEROBOT_HOME="/app"
+ENV HF_LEROBOT_HOME="/app"
 ENV LEADER_PORT="/dev/ttyACM0"
 ENV FOLLOWER_PORT="/dev/ttyACM1"
 ENV CAMERA_INDEX="0"
 # Set USE_SIM=1 to use gym-aloha instead of real arms
 ENV USE_SIM="0"
+# Headless MuJoCo rendering (no display required)
+ENV MUJOCO_GL="egl"
 
 CMD ["/bin/bash"]

@@ -13,7 +13,14 @@
 #   https://chameleoncloud.org/user/help/
 # Request: "custom pi_serial profile exposing /dev/ttyACM0 and /dev/ttyACM1"
 #
-# Build (on Pi or with buildx for arm64):
+# Pull pre-built arm64 image (recommended — cross-built on x86 with buildx):
+#   docker pull rianders/lerobot-soarm101:latest
+#
+# Build locally if you need to modify the image:
+#   # On x86 with buildx (cross-compile for arm64):
+#   docker buildx build --platform linux/arm64 --load \
+#     -t rianders/lerobot-soarm101:latest -f docker/Dockerfile.pi .
+#   # On the Pi itself (native arm64):
 #   docker build -t rianders/lerobot-soarm101:latest -f docker/Dockerfile.pi .
 #
 # Run locally (full device access for testing):
@@ -37,6 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     usbutils \
     v4l-utils \
     curl \
+    # build-essential + linux-libc-dev needed to build evdev (pynput dep of lerobot)
+    build-essential \
+    linux-libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -59,6 +69,9 @@ RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
 # HuggingFace CLI for dataset push/pull
 RUN uv pip install --system --no-cache "huggingface-hub[hf_xet,cli]"
 
+# Gradio for camera preview UI
+RUN uv pip install --system --no-cache gradio
+
 # Entrypoint scripts
 COPY docker/scripts/ /app/scripts/
 RUN chmod +x /app/scripts/*.sh
@@ -68,7 +81,7 @@ RUN mkdir -p /app/calibration /app/data /app/checkpoints
 
 ENV HF_TOKEN=""
 ENV HF_USER=""
-ENV LEROBOT_HOME="/app"
+ENV HF_LEROBOT_HOME="/app"
 ENV LEADER_PORT="/dev/ttyACM0"
 ENV FOLLOWER_PORT="/dev/ttyACM1"
 ENV CAMERA_INDEX="0"
