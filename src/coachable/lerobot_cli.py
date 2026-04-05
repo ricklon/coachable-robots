@@ -16,31 +16,37 @@ from pathlib import Path
 from coachable.fleet import Robot
 
 
-def calibrate(robot: Robot) -> None:
-    """Calibrate both leader and follower arms for a robot station.
+def calibrate(robot: Robot, calibration_dir: Path | None = None) -> None:
+    """Calibrate both follower and leader arms for a robot station.
 
     In lerobot v0.5.0:
-    - Leader arm is a teleop device: --teleop.type=so101_leader
-    - Follower arm is a robot device: --robot.type=so101_follower
-    """
-    # Calibrate leader (teleop)
-    cmd = [
-        "lerobot-calibrate",
-        f"--teleop.type=so101_leader",
-        f"--teleop.port={robot.leader_port}",
-        f"--teleop.id={robot.name}_leader",
-    ]
-    print(f"Calibrating leader (so101_leader) on {robot.leader_port}...")
-    subprocess.run(cmd, check=True)
+    - Follower arm is a robot device:  --robot.type=so101_follower
+    - Leader arm is a teleop device:   --teleop.type=so101_leader
 
-    # Calibrate follower (robot)
+    Calibrate follower first (per lerobot docs), then leader.
+    """
+    # Calibrate follower (robot) first
     cmd = [
         "lerobot-calibrate",
         f"--robot.type=so101_follower",
         f"--robot.port={robot.follower_port}",
         f"--robot.id={robot.name}_follower",
     ]
+    if calibration_dir:
+        cmd.append(f"--robot.calibration_dir={calibration_dir}")
     print(f"Calibrating follower (so101_follower) on {robot.follower_port}...")
+    subprocess.run(cmd, check=True)
+
+    # Calibrate leader (teleop) second
+    cmd = [
+        "lerobot-calibrate",
+        f"--teleop.type=so101_leader",
+        f"--teleop.port={robot.leader_port}",
+        f"--teleop.id={robot.name}_leader",
+    ]
+    if calibration_dir:
+        cmd.append(f"--teleop.calibration_dir={calibration_dir}")
+    print(f"Calibrating leader (so101_leader) on {robot.leader_port}...")
     subprocess.run(cmd, check=True)
 
 
