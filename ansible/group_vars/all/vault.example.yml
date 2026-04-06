@@ -11,5 +11,17 @@
 #   ansible-vault edit ansible/group_vars/all/vault.yml
 
 vault_hf_token: "hf_REPLACE_ME"
+
+# CHI@Edge application credential (from app-cred-chi-edge-openrc.sh)
 vault_chi_credential_id: "REPLACE_ME"
 vault_chi_credential_secret: "REPLACE_ME"
+
+# KVM@TACC control node — set after first provision
+vault_control_floating_ip: "REPLACE_ME"
+
+# Pi edge node SSH access
+vault_pi_ssh_private_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  REPLACE_ME
+  -----END OPENSSH PRIVATE KEY-----
+vault_pi_ssh_host_key: "REPLACE_ME"  # run: ssh-keyscan -p 22222 192.168.4.191
