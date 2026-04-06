@@ -61,12 +61,12 @@ chi-edge --help
      devices (not per-Pi; the device name is where you get specific)
    - Leave roles and expiration as defaults
 4. **Save the secret immediately** — it is shown only once
-5. Download the RC file (e.g., `app-cred-coachable-robots-openrc.sh`)
+5. Download the RC file (e.g., `app-cred-chi-edge-openrc.sh`)
 
 Source the RC file to load credentials into your shell:
 
 ```bash
-source app-cred-coachable-robots-openrc.sh
+source app-cred-chi-edge-openrc.sh
 ```
 
 Verify:

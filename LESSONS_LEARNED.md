@@ -104,7 +104,7 @@ ssh -p 22222 root@192.168.4.191 "balena run ..."
 
 ### Chameleon credentials must be loaded before any `chi.*` calls
 Running the notebook without sourcing the RC file produces HTTP 401 on all sites.  
-**Fix:** Add a credentials cell at the top that sources `app-cred-coachable-robots-openrc.sh` and injects `OS_*` env vars into the Python session.
+**Fix:** Add a credentials cell at the top that sources `app-cred-chi-edge-openrc.sh` (CHI@Edge) or `app-cred-kvm-tacc-openrc.sh` (KVM@TACC) and injects `OS_*` env vars into the Python session.
 
 ### Notebook cell order matters — `pi_run()` helper must be defined before §3a
 The camera preview cells call `pi_run()` which is defined in the pull+verify cell above it. Running §3a without running the setup cell first causes `NameError`.
