@@ -9,7 +9,7 @@ SO-ARM101 robots on the coachable platform.
 - SO-ARM101 leader + follower arms connected via USB (ttyACM0, ttyACM1)
 - Logitech C920 webcam connected (video0)
 - `config/fleet.yaml` configured for your lab (see `config/fleet.example.yaml`)
-- HuggingFace account with write access
+- HuggingFace account (`ricklon`) with write-scoped token
 
 ---
 
@@ -19,8 +19,8 @@ Check which robots are available and who is assigned:
 
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run --rm \
-   -v /path/to/fleet.yaml:/app/config/fleet.yaml \
+  "balena run -i \
+   -v /mnt/data/fleet.yaml:/app/config/fleet.yaml \
    rianders/lerobot-soarm101:latest \
    coachable --fleet /app/config/fleet.yaml fleet"
 ```
@@ -42,6 +42,10 @@ Expected output:
 
 If `ttyACM*` are missing: check USB connections and power to the servo controller boards.
 
+> **Port assignment is not deterministic.** `ttyACM0`/`ttyACM1` can swap on reconnect.
+> The fleet config uses serial numbers to track which is which, but always confirm
+> with a teleoperate test (Step 3b) before collecting.
+
 ---
 
 ## 2. Camera Preview
@@ -56,8 +60,10 @@ ssh -p 22222 -L 7860:localhost:7860 -f -N root@192.168.4.191
 **Start the preview container:**
 ```bash
 ssh -p 22222 root@192.168.4.191 \
-  "balena run -d --rm --privileged -v /dev:/dev \
+  "balena run -d --privileged \
+   --device=/dev/video0 \
    -p 7860:7860 \
+   -v /mnt/data/fleet.yaml:/app/config/fleet.yaml \
    rianders/lerobot-soarm101:latest \
    coachable --fleet /app/config/fleet.yaml preview --robot alpha"
 ```
@@ -66,6 +72,9 @@ ssh -p 22222 root@192.168.4.191 \
 
 The live feed starts automatically. Adjust camera position until the
 full workspace (pick and place area) is visible.
+
+> **Important:** Note the container name from `balena ps`. You must stop it
+> before collecting (Step 5) — it holds `/dev/video0` open.
 
 ---
 
@@ -77,7 +86,7 @@ full workspace (pick and place area) is visible.
 **Follower arm:**
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    --device=/dev/ttyACM1 \
    rianders/lerobot-soarm101:latest \
    lerobot-setup-motors \
@@ -91,7 +100,7 @@ Connect each motor individually when prompted.
 **Leader arm:**
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    --device=/dev/ttyACM0 \
    rianders/lerobot-soarm101:latest \
    lerobot-setup-motors \
@@ -102,60 +111,162 @@ ssh -p 22222 -t root@192.168.4.191 \
 
 ---
 
-## 4. Calibrate
+## 3b. Confirm Port Assignment (teleoperate test)
 
-> Run once per arm pair, or after any motor replacement.
-> Calibration files are saved to `/mnt/data/calibration` on the Pi.
+Before collecting, verify which arm is which. Move the leader arm and watch:
 
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    --device=/dev/ttyACM0 \
    --device=/dev/ttyACM1 \
-   -v /tmp/fleet.yaml:/app/config/fleet.yaml \
    -v /mnt/data/calibration:/app/calibration \
    rianders/lerobot-soarm101:latest \
-   coachable --fleet /app/config/fleet.yaml calibrate --robot alpha"
+   lerobot-teleoperate \
+     --robot.type=so101_follower \
+     --robot.port=/dev/ttyACM1 \
+     --robot.id=alpha_follower \
+     --robot.calibration_dir=/app/calibration \
+     --teleop.type=so101_leader \
+     --teleop.port=/dev/ttyACM0 \
+     --teleop.id=alpha_leader \
+     --teleop.calibration_dir=/app/calibration"
+```
+
+**What to expect:**
+- The follower arm's motors stiffen immediately on connect
+- Move the leader arm — the follower should mirror your movements
+- If motors activate on the wrong arm: swap `leader_port`/`follower_port` in `fleet.yaml`
+
+Press `Ctrl+C` to exit (exits cleanly).
+
+---
+
+## 4. Calibrate
+
+> Run once per arm pair, or after any motor replacement or reassembly.
+> Calibration is stored in servo EEPROM and in `/mnt/data/calibration/*.json`.
+> It persists across container restarts and reboots.
+
+```bash
+ssh -p 22222 -t root@192.168.4.191 \
+  "balena run -it --privileged \
+   --device=/dev/ttyACM0 \
+   --device=/dev/ttyACM1 \
+   -v /mnt/data/fleet.yaml:/app/config/fleet.yaml \
+   -v /mnt/data/calibration:/app/calibration \
+   rianders/lerobot-soarm101:latest \
+   coachable --fleet /app/config/fleet.yaml calibrate --robot alpha \
+     --calibration-dir /app/calibration"
 ```
 
 **What happens:**
-1. Follower arm calibrates first — move each joint to min/max when prompted
+1. Follower arm calibrates first — move each joint to its physical min/max when prompted
 2. Leader arm calibrates second — same process
-3. Move each joint slowly to its physical limits and press Enter
-4. Don't force joints past their mechanical stops
+3. Move each joint slowly to its mechanical limits and press Enter
+4. **Do not force joints past their mechanical stops**
 
 **Joints (6 per arm):** shoulder pan → shoulder lift → elbow flex → wrist flex → wrist roll → gripper
+
+> **Gripper cable warning:** The wrist_roll joint can pull the gripper servo cable
+> (motor ID 6) loose during calibration. Route the cable with slack to allow full
+> rotation. If you see "Missing motor IDs: 6" — reseat the cable and retry.
 
 ---
 
 ## 5. Collect Demonstrations
 
-Coach the robot by demonstrating the task with the leader arm.
-The follower arm mirrors your movements and records the episode.
+**First: stop the camera preview container** (it holds `/dev/video0`):
+```bash
+ssh -p 22222 root@192.168.4.191 "balena ps"
+# Find the preview container name, e.g. "competent_benz"
+ssh -p 22222 root@192.168.4.191 "balena stop competent_benz"
+```
 
+**Then collect:**
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    --device=/dev/ttyACM0 \
    --device=/dev/ttyACM1 \
-   -v /tmp/fleet.yaml:/app/config/fleet.yaml \
+   --device=/dev/video0 \
+   -v /mnt/data/fleet.yaml:/app/config/fleet.yaml \
    -v /mnt/data/calibration:/app/calibration \
    -v /mnt/data/datasets:/app/data \
+   -e HF_TOKEN=\$(cat /mnt/data/hf_token) \
    rianders/lerobot-soarm101:latest \
    coachable --fleet /app/config/fleet.yaml collect \
      --robot alpha \
      --dataset pick_block \
      --episodes 20 \
-     --task 'Pick up the block and place it in the box'"
+     --task 'Pick up the block and place it in the box' \
+     --calibration-dir /app/calibration \
+     --dataset-root /app/data"
 ```
 
-Dataset will be pushed to HuggingFace Hub at:
-`https://huggingface.co/datasets/{hf_user}/soarm101-{dataset}`
+**When to start moving:**
+After the command starts, lerobot prints a large config block — ignore it.
+A banner will appear:
+```
+==================================================
+WAIT: Ignore the config dump below.
+Watch for:  'Recording episode 0'
+THAT is when you start moving the leader arm.
+==================================================
+```
+Only start your demonstration when you see `Recording episode 0`.
+
+The CLI also prints the exact timing window for each episode:
+```
+Episode 0: RECORD 0s–30s  →  RESET 30s–40s (return arm to start)
+Episode 1: RECORD 40s–70s  →  RESET 70s–80s ...
+```
 
 **Tips:**
 - Demonstrate slowly and smoothly — the policy learns from your style
 - Keep demonstrations consistent (same start position each episode)
 - 20 episodes is a good starting point; 50+ for better policies
+- Return the arm to the home position during each reset window
+
+Dataset is pushed to HuggingFace Hub at:
+`https://huggingface.co/datasets/ricklon/soarm101-{dataset}`
+
+---
+
+## 5b. Replay to Verify
+
+Replay the last recorded episode to confirm the data was captured correctly:
+
+```bash
+ssh -p 22222 -t root@192.168.4.191 \
+  "balena run -it --privileged \
+   --device=/dev/ttyACM1 \
+   -v /mnt/data/calibration:/app/calibration \
+   -v /mnt/data/datasets:/app/data \
+   rianders/lerobot-soarm101:latest \
+   coachable --fleet /app/config/fleet.yaml replay \
+     --robot alpha \
+     --dataset ricklon/soarm101-pick_block \
+     --episode 0 \
+     --dataset-root /app/data"
+```
+
+The follower arm should reproduce your demonstration movement. If it makes no
+movement or only twitches, the episode was likely recorded with the arms on
+wrong ports — check LESSONS_LEARNED.md for the flat-values diagnosis.
+
+---
+
+## 5c. Push Dataset (if not auto-pushed)
+
+If `--no-push` was used or the push failed, push manually:
+
+```bash
+./scripts/push_dataset.sh pick_block
+```
+
+The script prompts for your HF write token, transfers it securely to the Pi,
+and pushes the dataset from the container. Token is never written to disk locally.
 
 ---
 
@@ -167,7 +278,7 @@ Or SSH to the MI100 node and run:
 ```bash
 conda activate lerobot
 python lerobot/scripts/train.py \
-    --dataset.repo_id={hf_user}/soarm101-pick_block \
+    --dataset.repo_id=ricklon/soarm101-pick_block \
     --policy.path=lerobot/act \
     --output_dir=outputs/train/act_pick_block \
     --policy.device=cuda
@@ -181,10 +292,10 @@ After training completes and the checkpoint is uploaded to HF Hub:
 
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    -v /mnt/data/checkpoints:/app/checkpoints \
    rianders/lerobot-soarm101:latest \
-   coachable fetch --repo {hf_user}/act-pick_block"
+   coachable fetch --repo ricklon/act-pick_block"
 ```
 
 ---
@@ -193,9 +304,10 @@ ssh -p 22222 -t root@192.168.4.191 \
 
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
-  "balena run -it \
+  "balena run -it --privileged \
    --device=/dev/ttyACM1 \
-   -v /tmp/fleet.yaml:/app/config/fleet.yaml \
+   --device=/dev/video0 \
+   -v /mnt/data/fleet.yaml:/app/config/fleet.yaml \
    -v /mnt/data/calibration:/app/calibration \
    -v /mnt/data/checkpoints:/app/checkpoints \
    rianders/lerobot-soarm101:latest \
@@ -212,8 +324,14 @@ ssh -p 22222 -t root@192.168.4.191 \
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `No motor found with ID 1` | Motors not configured | Run Step 3 (motor setup) |
+| `Missing motor IDs: 6` | Gripper cable unplugged | Reseat cable on wrist servo; retry |
 | `ttyACM0: Permission denied` | Missing `--device` flag | Add `--device=/dev/ttyACM0` |
-| Wrong arm responds to leader | Leader/follower ports swapped | Swap `leader_port`/`follower_port` in `fleet.yaml` |
-| Camera black / no image | Wrong camera index | Try `--camera 1` or `--camera 2` |
-| `/data/calibration: read-only` | BalenaOS read-only root | Use `/mnt/data/calibration` instead |
-| `OCI runtime: open /dev/console` | Full `-v /dev:/dev` mount | Use `--device` flags for specific devices only |
+| `OCI runtime: open /dev/console` | Using `-v /dev:/dev` | Use `--privileged` + `--device` flags instead |
+| Wrong arm responds to leader | Leader/follower ports swapped | Run teleoperate test (Step 3b); swap ports in `fleet.yaml` |
+| All joint values flat (0° range) | Recording from wrong port | See above |
+| Camera black / no image | Camera index wrong or held by preview | Stop preview container; verify `video0` |
+| `fps must be one of [10]` | C920 in YUYV mode | fourcc=MJPG is set in `lerobot_cli.py` — rebuild image |
+| `/data/calibration: read-only` | BalenaOS read-only root | Use `/mnt/data/calibration` |
+| `unknown flag: --rm` | balena-engine limitation | Omit `--rm`; use `balena rm` to clean up |
+| `FileExistsError` on dataset root | Wrong root path | Pass `--dataset-root /app/data` (parent only, CLI adds repo_id) |
+| Push fails with token error | Token has special chars / expired | Use `scripts/push_dataset.sh` for secure token passing |
