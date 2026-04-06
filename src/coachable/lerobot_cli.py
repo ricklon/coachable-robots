@@ -55,6 +55,8 @@ def record(
     repo_id: str,
     num_episodes: int,
     task: str,
+    calibration_dir: Path | None = None,
+    dataset_root: Path | None = None,
     episode_time_s: int = 30,
     reset_time_s: int = 10,
     fps: int = 30,
@@ -68,6 +70,7 @@ def record(
             "width": 1280,
             "height": 720,
             "fps": fps,
+            "fourcc": "MJPG",  # C920 needs MJPEG to achieve 30fps at 720p
         }
     }
 
@@ -87,9 +90,22 @@ def record(
         f"--dataset.reset_time_s={reset_time_s}",
         f"--dataset.fps={fps}",
         f"--dataset.push_to_hub={'true' if push_to_hub else 'false'}",
+        "--play_sounds=false",
     ]
+    if calibration_dir:
+        cmd.append(f"--robot.calibration_dir={calibration_dir}")
+        cmd.append(f"--teleop.calibration_dir={calibration_dir}")
+    if dataset_root:
+        # lerobot root = full dataset path, not parent dir
+        cmd.append(f"--dataset.root={dataset_root}/{repo_id}")
 
     print(f"Recording {num_episodes} episodes → {repo_id}")
+    print()
+    print("=" * 50)
+    print("WAIT: Ignore the config dump below.")
+    print("Watch for:  'Recording episode 0'")
+    print("THAT is when you start moving the leader arm.")
+    print("=" * 50)
     return subprocess.run(cmd, check=True)
 
 

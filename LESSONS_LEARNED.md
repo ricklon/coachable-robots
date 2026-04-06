@@ -134,3 +134,15 @@ Which arm lands on `ttyACM0` vs `ttyACM1` depends on USB enumeration order (whic
 
 ### `lsusb` identifies both arms as `QinHeng Electronics USB Single Serial` (1a86:55d3)
 No way to distinguish leader from follower by USB ID alone. Physical port assignment or calibration response is the only way.
+
+### Missing motor ID 6 is almost always an accidental disconnect
+**Symptom:** `FeetechMotorsBus motor check failed — Missing motor IDs: 6`  
+**Cause:** The gripper servo cable can pull out when rotating the wrist during calibration or teleoperation. The servo is physically present but not on the bus.  
+**Fix:** Check the cable connecting motor 6 (gripper) and reseat it. Re-run calibration or `lerobot-setup-motors` only if the ID was never assigned.
+
+### Gripper servo unplugs easily during wrist rotation
+The wrist_roll joint twists the servo cable bundle. During calibration, when moving joints through their full range, the gripper cable (motor ID 6) can disconnect.  
+**Prevention:** Before calibration, route the gripper cable with enough slack to allow full wrist rotation without tension.
+
+### Calibration files persist across container restarts
+Files saved to `/mnt/data/calibration` on BalenaOS survive reboots and container updates. Mount with `-v /mnt/data/calibration:/app/calibration` and pass `--robot.calibration_dir=/app/calibration` to avoid re-calibrating every session. Only recalibrate if a servo is replaced or the arm is reassembled.

@@ -47,6 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # build-essential + linux-libc-dev needed to build evdev (pynput dep of lerobot)
     build-essential \
     linux-libc-dev \
+    # spd-say needed by lerobot play_sounds (even when disabled, avoids FileNotFoundError)
+    speech-dispatcher \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -83,8 +85,7 @@ RUN chmod +x /app/scripts/*.sh 2>/dev/null || true
 COPY config/fleet.example.yaml /app/config/fleet.yaml
 RUN mkdir -p /app/calibration /app/data /app/checkpoints
 
-ENV HF_TOKEN=""
-ENV HF_USER=""
+# HF_TOKEN and HF_USER must be passed at runtime: -e HF_TOKEN=hf_xxx
 ENV HF_LEROBOT_HOME="/app"
 ENV FLEET_CONFIG="/app/config/fleet.yaml"
 ENV LEADER_PORT="/dev/ttyACM0"
