@@ -71,6 +71,18 @@
         state: present
       become: false
 
+    # ── Python 3.12 via uv ──
+    - name: Check if Python 3.12 is installed via uv
+      stat:
+        path: "{{ cc_home }}/.local/share/uv/python/cpython-3.12*/bin/python3.12"
+      register: py312_check
+      become: false
+
+    - name: Install Python 3.12 via uv
+      command: "{{ cc_home }}/.local/bin/uv python install 3.12"
+      become: false
+      when: not py312_check.stat.exists
+
     # ── Clone coachable-robots ──
     - name: Clone coachable-robots repo
       git:
@@ -80,10 +92,29 @@
         update: true
       become: false
 
+    # ── Create project venv with Python 3.12 ──
+    - name: Check if venv exists
+      stat:
+        path: "{{ cc_home }}/.venv/bin/python"
+      register: venv_check
+      become: false
+
+    - name: Create venv with Python 3.12
+      command: "{{ cc_home }}/.local/bin/uv venv --python 3.12 {{ cc_home }}/.venv"
+      become: false
+      when: not venv_check.stat.exists
+
+    - name: Ensure venv is activated in .bashrc
+      lineinfile:
+        path: "{{ cc_home }}/.bashrc"
+        line: 'source $HOME/.venv/bin/activate'
+        state: present
+      become: false
+
     # ── Install coachable package ──
     - name: Install coachable package with uv
       command: >
-        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        {{ cc_home }}/.local/bin/uv pip install --python {{ cc_home }}/.venv/bin/python --no-cache
         -e {{ repo_dest }}
       become: false
       register: coachable_install
@@ -92,14 +123,17 @@
     # ── HuggingFace CLI ──
     - name: Install HuggingFace CLI
       command: >
-        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        {{ cc_home }}/.local/bin/uv pip install --python {{ cc_home }}/.venv/bin/python --no-cache
         "huggingface-hub[hf_xet,cli]"
       become: false
       register: hfcli_install
       changed_when: "'already satisfied' not in hfcli_install.stdout"
 
-    - name: Authenticate HuggingFace CLI
-      command: huggingface-cli login --token {{ hf_token }}
+    - name: Authenticate HuggingFace (write token to cache)
+      shell: |
+        mkdir -p {{ cc_home }}/.cache/huggingface
+        echo '{"url_to_token": {"https://huggingface.co": "{{ hf_token }}"}}' \
+          > {{ cc_home }}/.cache/huggingface/token
       become: false
       no_log: true
       changed_when: false
@@ -107,7 +141,7 @@
     # ── JupyterLab ──
     - name: Install JupyterLab
       command: >
-        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        {{ cc_home }}/.local/bin/uv pip install --python {{ cc_home }}/.venv/bin/python --no-cache
         jupyterlab ipykernel
       become: false
       register: jupyter_install
@@ -153,8 +187,8 @@
           Type=simple
           User=cc
           WorkingDirectory={{ cc_home }}/coachable-robots
-          Environment="PATH={{ cc_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
-          ExecStart=/usr/local/bin/jupyter lab \
+          Environment="PATH={{ cc_home }}/.venv/bin:{{ cc_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+          ExecStart={{ cc_home }}/.venv/bin/jupyter lab \
             --config={{ cc_home }}/.jupyter/jupyter_server_config.py
           Restart=on-failure
           RestartSec=10
@@ -239,7 +273,7 @@
 
     # ── Verification ──
     - name: Verify coachable CLI is importable
-      command: python3 -c "import coachable; print('coachable OK')"
+      command: "{{ cc_home }}/.venv/bin/python -c \"import coachable; print('coachable OK')\""
       become: false
       changed_when: false
       register: coachable_check
