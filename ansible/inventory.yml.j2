@@ -14,3 +14,11 @@ all:
           ansible_user: cc
           ansible_ssh_private_key_file: /work/.ssh/id_rsa
           ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    control:
+      hosts:
+        kvm:
+          ansible_host: "{{ control_ip }}"
+          ansible_user: cc
+          ansible_ssh_private_key_file: /work/.ssh/id_rsa
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no"

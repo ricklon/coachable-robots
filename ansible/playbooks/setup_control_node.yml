@@ -1,0 +1,266 @@
+---
+# setup_control_node.yml
+# Provisions a KVM@TACC m1.large VM as the persistent control node.
+#
+# What this installs:
+#   - uv, Python 3.12 (via uv)
+#   - JupyterLab (systemd service, persists across reboots)
+#   - coachable-robots repo (cloned to ~/coachable-robots)
+#   - coachable package (editable install)
+#   - HF CLI (authenticated)
+#   - SSH key for reaching the Pi edge node
+#
+# Usage (from Chameleon JupyterHub or your laptop):
+#   ansible-playbook -i "<kvm_floating_ip>," -u cc \
+#     --private-key ~/.ssh/id_rsa \
+#     ansible/playbooks/setup_control_node.yml
+#
+# Or with the generated inventory:
+#   ansible-playbook -i ansible/inventory.yml \
+#     --limit control ansible/playbooks/setup_control_node.yml
+
+- name: Configure KVM Control Node
+  hosts: control
+  become: true
+  vars:
+    cc_home: /home/cc
+    repo_url: https://github.com/ricklon/coachable-robots.git
+    repo_dest: "{{ cc_home }}/coachable-robots"
+    jupyter_port: 8888
+    # hf_user and hf_token come from group_vars/all/vars.yml (vault-backed)
+    # pi_host and pi_port come from group_vars/all/vars.yml
+
+  tasks:
+    # ── System Prerequisites ──
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - tmux
+          - htop
+          - build-essential
+          - ffmpeg
+          - openssh-client
+        state: present
+
+    # ── uv (Python package manager) ──
+    - name: Check if uv is installed
+      stat:
+        path: "{{ cc_home }}/.local/bin/uv"
+      register: uv_bin
+      become: false
+
+    - name: Install uv
+      shell: curl -Ls https://astral.sh/uv/install.sh | sh
+      become: false
+      when: not uv_bin.stat.exists
+      args:
+        executable: /bin/bash
+
+    - name: Ensure uv is on PATH in .bashrc
+      lineinfile:
+        path: "{{ cc_home }}/.bashrc"
+        line: 'export PATH="$HOME/.local/bin:$PATH"'
+        state: present
+      become: false
+
+    # ── Clone coachable-robots ──
+    - name: Clone coachable-robots repo
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ repo_dest }}"
+        version: main
+        update: true
+      become: false
+
+    # ── Install coachable package ──
+    - name: Install coachable package with uv
+      command: >
+        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        -e {{ repo_dest }}
+      become: false
+      register: coachable_install
+      changed_when: "'already satisfied' not in coachable_install.stdout"
+
+    # ── HuggingFace CLI ──
+    - name: Install HuggingFace CLI
+      command: >
+        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        "huggingface-hub[hf_xet,cli]"
+      become: false
+      register: hfcli_install
+      changed_when: "'already satisfied' not in hfcli_install.stdout"
+
+    - name: Authenticate HuggingFace CLI
+      command: huggingface-cli login --token {{ hf_token }}
+      become: false
+      no_log: true
+      changed_when: false
+
+    # ── JupyterLab ──
+    - name: Install JupyterLab
+      command: >
+        {{ cc_home }}/.local/bin/uv pip install --system --no-cache
+        jupyterlab ipykernel
+      become: false
+      register: jupyter_install
+      changed_when: "'already satisfied' not in jupyter_install.stdout"
+
+    - name: Create Jupyter config directory
+      file:
+        path: "{{ cc_home }}/.jupyter"
+        state: directory
+        owner: cc
+        group: cc
+        mode: "0700"
+      become: false
+
+    - name: Write Jupyter server config (no browser, bind all interfaces)
+      copy:
+        dest: "{{ cc_home }}/.jupyter/jupyter_server_config.py"
+        owner: cc
+        group: cc
+        mode: "0600"
+        content: |
+          c.ServerApp.ip = '127.0.0.1'
+          c.ServerApp.port = {{ jupyter_port }}
+          c.ServerApp.open_browser = False
+          c.ServerApp.notebook_dir = '{{ cc_home }}/coachable-robots'
+          # Token auth — set a password with: jupyter lab password
+          # Or pass --ServerApp.token='' for no auth (only safe behind SSH tunnel)
+          c.ServerApp.token = ''
+          c.ServerApp.password = ''
+          c.ServerApp.allow_password_change = False
+      become: false
+
+    - name: Create JupyterLab systemd service
+      copy:
+        dest: /etc/systemd/system/jupyterlab.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=JupyterLab — coachable-robots control node
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=cc
+          WorkingDirectory={{ cc_home }}/coachable-robots
+          Environment="PATH={{ cc_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+          ExecStart=/usr/local/bin/jupyter lab \
+            --config={{ cc_home }}/.jupyter/jupyter_server_config.py
+          Restart=on-failure
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start JupyterLab service
+      systemd:
+        name: jupyterlab
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── SSH key for Pi access ──
+    - name: Create .ssh directory
+      file:
+        path: "{{ cc_home }}/.ssh"
+        state: directory
+        owner: cc
+        group: cc
+        mode: "0700"
+      become: false
+
+    - name: Copy Pi SSH private key to control node
+      copy:
+        content: "{{ pi_ssh_private_key }}"
+        dest: "{{ cc_home }}/.ssh/pi_id_rsa"
+        owner: cc
+        group: cc
+        mode: "0600"
+      become: false
+      no_log: true
+      when: pi_ssh_private_key is defined
+
+    - name: Add Pi to known_hosts (avoid first-connect prompt)
+      known_hosts:
+        name: "[{{ pi_host }}]:{{ pi_port | default(22222) }}"
+        key: "{{ pi_ssh_host_key }}"
+        state: present
+      become: false
+      when: pi_ssh_host_key is defined
+
+    - name: Write SSH client config for Pi shortcut
+      blockinfile:
+        path: "{{ cc_home }}/.ssh/config"
+        create: true
+        owner: cc
+        group: cc
+        mode: "0600"
+        marker: "# {mark} coachable-robots pi config"
+        block: |
+          Host pi
+            HostName {{ pi_host | default('192.168.4.191') }}
+            Port {{ pi_port | default(22222) }}
+            User root
+            IdentityFile ~/.ssh/pi_id_rsa
+            StrictHostKeyChecking no
+      become: false
+      when: pi_host is defined
+
+    # ── Fleet config ──
+    - name: Create config directory
+      file:
+        path: "{{ repo_dest }}/config"
+        state: directory
+        owner: cc
+        group: cc
+        mode: "0755"
+      become: false
+
+    - name: Copy fleet.yaml if not present
+      copy:
+        src: "{{ repo_dest }}/config/fleet.example.yaml"
+        dest: "{{ repo_dest }}/config/fleet.yaml"
+        remote_src: true
+        owner: cc
+        group: cc
+        mode: "0644"
+        force: false          # don't overwrite if already customised
+      become: false
+
+    # ── Verification ──
+    - name: Verify coachable CLI is importable
+      command: python3 -c "import coachable; print('coachable OK')"
+      become: false
+      changed_when: false
+      register: coachable_check
+
+    - name: Show coachable version
+      debug:
+        msg: "{{ coachable_check.stdout }}"
+
+    - name: Check JupyterLab service status
+      command: systemctl is-active jupyterlab
+      register: jupyter_status
+      changed_when: false
+
+    - name: Show Jupyter status
+      debug:
+        msg: "JupyterLab: {{ jupyter_status.stdout }} on port {{ jupyter_port }}"
+
+    - name: Print access instructions
+      debug:
+        msg:
+          - "Control node is ready."
+          - "SSH tunnel from your laptop:"
+          - "  ssh -L 8888:localhost:{{ jupyter_port }} cc@<kvm-floating-ip>"
+          - "Then open: http://localhost:8888"
