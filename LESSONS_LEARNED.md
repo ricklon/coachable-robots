@@ -354,10 +354,26 @@ chi-edge device sync soarm101-1
 
 **What's actually needed:** `video0` and `video2` must be registered as named device profiles in the CHI@Edge smarter-device-manager config — exactly as `ttyacm0`/`ttyacm1` were added previously. This requires a helpdesk ticket.
 
-**Status:** Pending helpdesk resolution. Run the container without camera profiles until resolved:
+**Device mapping on this Pi (verified with v4l2-ctl):**
+| Device | Camera | Role |
+|--------|--------|------|
+| `/dev/video0` | HD Pro Webcam C920 | capture ← what we need |
+| `/dev/video1` | HD Pro Webcam C920 | metadata/control node |
+| `/dev/video2` | HD USB Camera (gripper) | capture ← what we need |
+| `/dev/video3` | HD USB Camera (gripper) | metadata/control node |
+
+**Helpdesk status:**
+- `video0`, `video1` — ✅ enabled (but video1 is C920 metadata, not the gripper)
+- `video2`, `video3` — ⏳ pending (helpdesk thought video0/video1 were two different cameras)
+
+**Follow-up message to helpdesk:** "video0 and video1 are both nodes for the same C920 webcam. We need video2 and video3 as well — those are the gripper camera (HD USB Camera on usb-xhci-hcd.0-1). Ideally all four: video0, video1, video2, video3."
+
+**Working container profiles once all four are enabled:**
 ```python
-device_profiles=["ttyacm0", "ttyacm1"]   # serial ports work; cameras pending
+device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"]
 ```
+
+**Current workaround:** Use `balena run` directly with `--privileged --device=/dev/video0 --device=/dev/video2`.
 
 **Workaround for local-network access (bypasses CHI@Edge scheduling entirely):**
 ```bash
