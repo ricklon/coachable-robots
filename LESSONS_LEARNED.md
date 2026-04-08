@@ -362,18 +362,19 @@ chi-edge device sync soarm101-1
 | `/dev/video2` | HD USB Camera (gripper) | capture ← what we need |
 | `/dev/video3` | HD USB Camera (gripper) | metadata/control node |
 
-**Helpdesk status:**
-- `video0`, `video1` — ✅ enabled (but video1 is C920 metadata, not the gripper)
-- `video2`, `video3` — ⏳ pending (helpdesk thought video0/video1 were two different cameras)
+**Helpdesk status:** All four profiles enabled and confirmed working ✅
 
-**Follow-up message to helpdesk:** "video0 and video1 are both nodes for the same C920 webcam. We need video2 and video3 as well — those are the gripper camera (HD USB Camera on usb-xhci-hcd.0-1). Ideally all four: video0, video1, video2, video3."
-
-**Working container profiles once all four are enabled:**
+**Working container profiles:**
 ```python
 device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"]
 ```
 
-**Current workaround:** Use `balena run` directly with `--privileged --device=/dev/video0 --device=/dev/video2`.
+**Important:** The CHI@Edge container and any local `balena run` container share the same
+physical camera hardware on the Pi. Only one can hold the cameras at a time.
+Stop the local preview before using cameras via CHI@Edge:
+```bash
+ssh -p 22222 root@192.168.4.191 "balena stop coachable-preview"
+```
 
 **Workaround for local-network access (bypasses CHI@Edge scheduling entirely):**
 ```bash
