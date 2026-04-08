@@ -14,10 +14,8 @@ Or called directly from a notebook:
 from __future__ import annotations
 
 import json
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Generator
 
 import cv2
 import gradio as gr
@@ -71,7 +69,9 @@ def _open_camera(
     index: int, width: int, height: int, fps: int
 ) -> tuple[cv2.VideoCapture | None, int, int, float, str | None]:
     """Open a camera. Returns (cap, actual_w, actual_h, actual_fps, error_msg)."""
-    cap = cv2.VideoCapture(index)
+    # Use device path + CAP_V4L2 for reliable access on Linux/Pi
+    device_path = f"/dev/video{index}"
+    cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
     if not cap.isOpened():
         return None, width, height, float(fps), f"Cannot open /dev/video{index}"
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -93,30 +93,25 @@ def _placeholder_frame(width: int, height: int, label: str, error: str) -> np.nd
     return frame
 
 
-def _make_stream(
+def _make_capture_fn(
     cap: cv2.VideoCapture | None,
     width: int,
     height: int,
-    fps: int,
     label: str,
     error: str | None,
-) -> Generator[np.ndarray, None, None]:
-    """Infinite generator yielding RGB frames for one camera."""
-    delay = 1.0 / max(fps, 1)
-    if cap is None:
-        placeholder = _placeholder_frame(width, height, label, error or "unavailable")
-        while True:
-            yield placeholder
-            time.sleep(delay)
-    else:
-        placeholder = _placeholder_frame(width, height, label, "No frame")
-        while True:
-            ret, frame = cap.read()
-            if ret:
-                yield cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            else:
-                yield placeholder
-            time.sleep(delay)
+):
+    """Return a no-arg callable that grabs one RGB frame (for gr.Timer)."""
+    placeholder = _placeholder_frame(width, height, label, error or "unavailable")
+
+    def grab() -> np.ndarray:
+        if cap is None:
+            return placeholder
+        ret, frame = cap.read()
+        if ret:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return placeholder
+
+    return grab
 
 
 # ---------------------------------------------------------------------------
@@ -252,17 +247,14 @@ def launch(
                                 )
                             )
 
-        # Wire up streaming generators (one demo.load per camera)
-        # demo.load requires a callable, so wrap each generator in a closure
+        # Use gr.Timer for periodic frame capture (Gradio 6 approach)
+        timer = gr.Timer(value=1.0 / fps)
         for cam_name, img_widget in image_widgets.items():
             cap, w, h, actual_fps, err = cam_info[cam_name]
-
-            def _make_fn(c, _w, _h, _fps, _label, _err):
-                def stream_fn():
-                    yield from _make_stream(c, _w, _h, _fps, _label, _err)
-                return stream_fn
-
-            demo.load(fn=_make_fn(cap, w, h, fps, cam_name, err), outputs=img_widget)
+            timer.tick(
+                fn=_make_capture_fn(cap, w, h, cam_name, err),
+                outputs=img_widget,
+            )
 
     demo.queue()
     demo.launch(server_name="0.0.0.0", server_port=port, share=False, theme=gr.themes.Base())

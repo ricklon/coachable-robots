@@ -76,7 +76,8 @@ No custom named profile needed — the port names themselves are valid profile e
 - `ttyacm0` → `/dev/ttyACM0` (individual serial port entry)
 - `ttyacm1` → `/dev/ttyACM1` (individual serial port entry)
 - `pi_serial` → `/dev/ttyACM0` only (legacy; use `ttyacm0`/`ttyacm1` directly instead)
-- `pi_camera` → `/dev/video*` + memory devices
+- `pi_camera` → Pi 4 CSI cameras only (vchiq/vcsm-cma) — **incompatible with Pi 5**
+- `pi_libcamera` → USB cameras on Pi 5 via libcamera stack — use this instead
 - `pi_gpio` → `/dev/gpiomem`, `/dev/i2c-1`, `/dev/gpiochip0/1`
 - `pi_meter` → `/dev/ttyUSB0`
 
@@ -311,6 +312,17 @@ chi-edge device sync soarm101-1
 # Wait ~90s, then re-check all states are STEADY
 ```
 
+### CHI@Edge container must use `command=["sleep", "infinity"]` — default CMD exits immediately
+**Problem:** Container image CMD is `/bin/bash`. In a non-interactive Zun container with no stdin, bash exits immediately, leaving the container in `ContainersNotReady` / crash loop. Previously this was masked because the container was always `Unschedulable` (bad camera profile).  
+**Fix:** Set `command=["sleep", "infinity"]` in the Container constructor, then use `my_container.execute("bash -c '...'")` to run commands:
+```python
+my_container = Container(
+    ...
+    command=["sleep", "infinity"],
+)
+```
+Note: `execute()` does not go through a shell — use `bash -c '...'` for pipes, globs, or redirects.
+
 ### CHI@Edge openrc lives in `ansible/`, not `~/Downloads/`
 The correct credential file for CHI@Edge is `ansible/app-cred-chi-edge-openrc.sh`.  
 `~/Downloads/app-cred-coachable-robots-openrc.sh` and `app-cred-kvm-tacc-openrc.sh` are both KVM@TACC credentials despite their names.
@@ -330,26 +342,65 @@ ssh -p 22222 root@192.168.4.191 "balena restart k3s-rpi5_<uuid>"
 chi-edge device sync soarm101-1
 ```
 
-### `pi_camera` profile incompatible with Pi 5 USB cameras; use `video0`/`video1` but mappings must be added by helpdesk
-**Symptom 1 — `pi_camera`:** Container Unschedulable with:  
-`1 Insufficient smarter-devices/vchiq, 1 Insufficient smarter-devices/vcsm-cma, 1 Insufficient smarter-devices/video10-18`  
-**Cause:** `pi_camera` profile was designed for Pi 4 CSI cameras. `vchiq`, `vcsm-cma`, and `video10-18` don't exist on Pi 5 with USB-only cameras.
+### Both `pi_camera` and `pi_libcamera` target Pi 4 CSI hardware — neither works for USB cameras on Pi 5
+**Symptom:** Container Unschedulable regardless of which profile is used:
+```
+1 Insufficient smarter-devices/vchiq
+1 Insufficient smarter-devices/vcsm-cma
+1 Insufficient smarter-devices/video10-18
+1 Insufficient smarter-devices/v4l-subdev0
+```
+**Cause:** Both `pi_camera` and `pi_libcamera` map to the Pi Camera Module CSI pipeline (`vchiq`, `vcsm-cma`, `video10`–`video18`). Neither exposes USB UVC cameras (`/dev/video0`, `/dev/video2`). The helpdesk suggestion to use `pi_libcamera` for Pi 5 USB cameras did not work.
 
-**Symptom 2 — `video0`/`video1` directly:** Container fails with:  
-`Missing mapping for device_profile 'video0', ensure it has been added to device_profile_mappings.`  
-**Cause:** Like `ttyacm0`/`ttyacm1`, individual video device names must be explicitly registered on the CHI@Edge server side before they can be used.
+**What's actually needed:** `video0` and `video2` must be registered as named device profiles in the CHI@Edge smarter-device-manager config — exactly as `ttyacm0`/`ttyacm1` were added previously. This requires a helpdesk ticket.
 
-**Pattern:** CHI@Edge device profiles follow the same convention for all devices — individual lowercase device names (e.g. `ttyacm0`, `video0`) must have server-side mappings added by the Chameleon helpdesk before they work.
+**Status:** Pending helpdesk resolution. Run the container without camera profiles until resolved:
+```python
+device_profiles=["ttyacm0", "ttyacm1"]   # serial ports work; cameras pending
+```
 
-**Fix needed:** Submit helpdesk ticket requesting `video0` and `video1` device profile mappings, exactly as was done for `ttyacm0`/`ttyacm1`.
-
-**Workaround for local network:** Use `balena run` directly:
+**Workaround for local-network access (bypasses CHI@Edge scheduling entirely):**
 ```bash
 balena run -d --privileged \
-  --device=/dev/video0 --device=/dev/video1 \
+  --device=/dev/video0 --device=/dev/video2 \
   -v /mnt/data/config/fleet.yaml:/app/config/fleet.yaml \
-  -p 7860:7860 <image_id> coachable preview --robot alpha
+  -v /mnt/data/calibration:/app/calibration \
+  -p 7860:7860 \
+  --name coachable-preview \
+  rianders/lerobot-soarm101:latest \
+  coachable preview --robot alpha --calibration-dir /app/calibration
 ```
+
+### Chameleon has no mesh VPN — use Tailscale to connect Pi lab to cloud resources
+**Problem:** CHI@Edge and KVM@TACC have no built-in private networking between arbitrary endpoints (e.g. a Pi on a home/lab network and a cloud training node).  
+**What Chameleon does offer:**
+- Isolated tenant VLANs within a single site (e.g. two nodes both at CHI@TACC can share a private network)
+- Stitched Layer-2 circuits between Chameleon sites or to FABRIC nodes (requires a network reservation)
+- FABRIC (fabric-testbed.net) — separate NSF-funded programmable network testbed, interoperable with Chameleon for cross-institution circuits; not a general-purpose VPN
+
+**None of the above reaches a Pi on a home or university lab network.**
+
+**Fix:** Install Tailscale on the Pi (BalenaOS has an official block) and on any Chameleon nodes. All devices get a `100.x.x.x` address on a private mesh regardless of what network they're on — no floating IPs or SSH tunnels needed.
+
+```yaml
+# docker-compose.yml on Pi (balena)
+services:
+  tailscale:
+    image: bh.cr/balenalabs/tailscale-balena
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW, SYS_MODULE]
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      TAILSCALE_AUTH_KEY: "tskey-auth-..."
+```
+```bash
+# On any Chameleon node (bare-metal or VM)
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --authkey tskey-auth-...
+```
+
+**Note:** FABRIC is worth exploring if you need dedicated low-latency bandwidth between CHI@Edge and a training node for large dataset transfers, but Tailscale is the right tool for daily lab connectivity.
 
 ### BalenaOS root filesystem is read-only — use `/mnt/data/` for persistent files
 `/app/` and most of the root filesystem are read-only on BalenaOS. The writable persistent volume is `/mnt/data/`.  
@@ -359,3 +410,120 @@ ssh -p 22222 root@192.168.4.191 "mkdir -p /mnt/data/config"
 scp -P 22222 config/fleet.yaml root@192.168.4.191:/mnt/data/config/fleet.yaml
 ```
 Mount into containers with `-v /mnt/data/config/fleet.yaml:/app/config/fleet.yaml`.
+
+---
+
+## Coachable CLI Reference
+
+All commands run inside the Docker container on the Pi (or any node with the image).
+The global `--fleet` flag defaults to `/app/config/fleet.yaml`.
+
+### Session flow (outside-class management)
+
+```bash
+# 1. SSH onto the Pi
+ssh -p 22222 root@192.168.4.191
+
+# 2. Start an interactive container session
+balena run -it --privileged \
+  --device=/dev/ttyACM0 --device=/dev/ttyACM1 \
+  --device=/dev/video0  --device=/dev/video2 \
+  -v /mnt/data/config/fleet.yaml:/app/config/fleet.yaml \
+  -v /mnt/data/calibration:/app/calibration \
+  -v /mnt/data:/app/data \
+  rianders/lerobot-soarm101:latest bash
+```
+
+### `coachable fleet` — inspect fleet status
+
+```bash
+coachable fleet
+# Prints: robot name, type, status, assigned coach, dataset prefix
+```
+
+### `coachable preview` — live camera feed (Gradio)
+
+```bash
+# Full robot config (reads cameras from fleet.yaml)
+coachable preview --robot alpha --calibration-dir /app/calibration
+
+# Single camera override (no fleet.yaml needed)
+coachable preview --camera 0
+
+# Custom port (default 7860)
+coachable preview --robot alpha --port 7861
+```
+
+Access via SSH tunnel: `ssh -p 22222 -L 7860:localhost:7860 root@192.168.4.191 -N`  
+Then open `http://localhost:7860`.
+
+> Stop this container before collecting — it holds `/dev/video0` open.
+
+### `coachable calibrate` — calibrate arm servos
+
+```bash
+coachable calibrate --robot alpha --calibration-dir /app/calibration
+# Calibrates follower first, then leader (lerobot order)
+# Saves: /app/calibration/alpha_follower.json, alpha_leader.json
+```
+
+Only needs to be re-run if a servo is replaced or the arm is reassembled.
+Files persist at `/mnt/data/calibration/` across container restarts.
+
+### `coachable collect` — record demonstration episodes
+
+```bash
+# Basic: 20 episodes of pick_block
+coachable collect --robot alpha --dataset pick_block --episodes 20
+
+# Full options
+coachable collect \
+  --robot alpha \
+  --dataset pick_block \
+  --episodes 20 \
+  --task "Pick up the red block and place it in the bin" \
+  --fps 30 \
+  --episode-time 30 \
+  --reset-time 10 \
+  --calibration-dir /app/calibration \
+  --dataset-root /app/data
+
+# Don't push to HuggingFace (local-only)
+coachable collect --robot alpha --dataset test_run --episodes 5 --no-push
+```
+
+Dataset lands at `https://huggingface.co/datasets/ricklon/soarm101-pick_block`.
+
+### `coachable fetch` — pull trained checkpoint from HuggingFace
+
+```bash
+coachable fetch --repo ricklon/act-pick_block
+# Downloads to /app/checkpoints/latest by default
+
+coachable fetch --repo ricklon/act-pick_block --dir /app/checkpoints/pick_block_v2
+```
+
+### `coachable run` — execute a trained policy
+
+```bash
+# Run policy from default checkpoint location
+coachable run --robot alpha
+
+# Run specific checkpoint, custom task description
+coachable run \
+  --robot alpha \
+  --checkpoint /app/checkpoints/pick_block_v2 \
+  --task "Pick up the red block and place it in the bin" \
+  --episodes 5
+```
+
+### Outside-class management quick reference
+
+| Task | Command |
+|------|---------|
+| Check robot status | `coachable fleet` |
+| Start camera preview | `coachable preview --robot alpha --calibration-dir /app/calibration` |
+| Calibrate arms | `coachable calibrate --robot alpha --calibration-dir /app/calibration` |
+| Record 20 demos | `coachable collect --robot alpha --dataset pick_block --episodes 20` |
+| Pull trained model | `coachable fetch --repo ricklon/act-pick_block` |
+| Run policy | `coachable run --robot alpha --checkpoint /app/checkpoints/latest` |

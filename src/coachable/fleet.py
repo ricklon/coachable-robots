@@ -22,6 +22,7 @@ class Robot:
     leader_port: str             # /dev/ttyACM0
     follower_port: str           # /dev/ttyACM1
     cameras: dict[str, int]      # {"top": 0, "gripper": 1} → /dev/video{N}
+    camera_config: dict[str, dict]  # per-camera {width, height, fps, fourcc}
     coach: str | None            # name of assigned coach (or None)
     status: str                  # "available" | "in_use" | "offline"
 
@@ -69,6 +70,7 @@ def load_fleet(path: Path = DEFAULT_FLEET_PATH) -> FleetConfig:
                 if "cameras" in r
                 else {"top": int(r.get("camera_index", 0))}
             ),
+            camera_config=r.get("camera_config", {}),
             coach=r.get("coach"),
             status=r.get("status", "available"),
         )

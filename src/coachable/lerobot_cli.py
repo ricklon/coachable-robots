@@ -64,14 +64,15 @@ def record(
 ) -> subprocess.CompletedProcess:
     """Record demonstration episodes using lerobot-record."""
     cameras = {
-        "webcam": {
+        cam_name: {
             "type": "opencv",
-            "index_or_path": robot.camera_index,
-            "width": 1280,
-            "height": 720,
-            "fps": fps,
-            "fourcc": "MJPG",  # C920 needs MJPEG to achieve 30fps at 720p
+            "index_or_path": cam_idx,
+            "width":  robot.camera_config.get(cam_name, {}).get("width",  1280),
+            "height": robot.camera_config.get(cam_name, {}).get("height", 720),
+            "fps":    robot.camera_config.get(cam_name, {}).get("fps",    fps),
+            "fourcc": robot.camera_config.get(cam_name, {}).get("fourcc", "MJPG"),
         }
+        for cam_name, cam_idx in robot.cameras.items()
     }
 
     cmd = [
