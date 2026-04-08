@@ -19,6 +19,10 @@ fleet:
       cameras:                       # named cameras → /dev/video{N}
         top: 0                       # overhead/top camera
         gripper: 1                   # wrist/gripper camera
+      camera_config:                 # per-camera resolution/fps (optional, defaults: 1280x720@30 MJPG)
+        top:     {width: 1280, height: 720, fps: 30, fourcc: MJPG}
+        gripper: {width: 1024, height: 768, fps: 30, fourcc: MJPG}
+        # Note: check camera capabilities with: v4l2-ctl --device=/dev/videoN --list-formats-ext
       coach: alice                   # name of assigned coach (from coaches list)
       status: available              # available | in_use | offline
 
