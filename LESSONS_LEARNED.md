@@ -314,3 +314,34 @@ chi-edge device sync soarm101-1
 ### CHI@Edge openrc lives in `ansible/`, not `~/Downloads/`
 The correct credential file for CHI@Edge is `ansible/app-cred-chi-edge-openrc.sh`.  
 `~/Downloads/app-cred-coachable-robots-openrc.sh` and `app-cred-kvm-tacc-openrc.sh` are both KVM@TACC credentials despite their names.
+
+### Stale coordinator lock blocks all container scheduling after hardware maintenance
+**Symptom:** Containers stuck in `Error / Unschedulable` immediately after Pi reboot following physical work.  
+**Cause:** The CHI@Edge coordinator holds a distributed update lock. If the Pi is powered off mid-operation (e.g. for hardware maintenance), the lock is never released.  
+**Fix:**
+```bash
+ssh -p 22222 root@192.168.4.191 \
+  "balena restart coordinator_<uuid>"
+# Logs will show: "Breaking stale update lock from previous run"
+```
+Also restart k3s and re-sync:
+```bash
+ssh -p 22222 root@192.168.4.191 "balena restart k3s-rpi5_<uuid>"
+chi-edge device sync soarm101-1
+```
+
+### `pi_camera` device profile requires CSI devices not present on Pi 5 with USB cameras
+**Symptom:** Container Unschedulable with:  
+`1 Insufficient smarter-devices/vchiq, 1 Insufficient smarter-devices/vcsm-cma, 1 Insufficient smarter-devices/v4l-subdev0, 1 Insufficient smarter-devices/video10-18`  
+**Cause:** The `pi_camera` profile was designed for Pi 4 CSI camera modules. `vchiq`, `vcsm-cma`, and `video10-18` are VideoCore / CSI interface devices. The Pi 5 with USB cameras (Logitech C920) only exposes `video0` and `video1` — the CSI devices don't exist.  
+**Workaround for local network:** Use `balena run` directly with `--device=/dev/video0 --device=/dev/video1 --privileged` — bypasses CHI@Edge scheduling entirely.  
+**Long-term fix needed:** Submit a Chameleon helpdesk ticket requesting a USB-camera-only device profile (e.g. `usb_camera`) that maps to `video0`/`video1` without requiring CSI devices.
+
+### BalenaOS root filesystem is read-only — use `/mnt/data/` for persistent files
+`/app/` and most of the root filesystem are read-only on BalenaOS. The writable persistent volume is `/mnt/data/`.  
+**Fix:** Store fleet.yaml and calibration files at `/mnt/data/config/` and `/mnt/data/calibration/`:
+```bash
+ssh -p 22222 root@192.168.4.191 "mkdir -p /mnt/data/config"
+scp -P 22222 config/fleet.yaml root@192.168.4.191:/mnt/data/config/fleet.yaml
+```
+Mount into containers with `-v /mnt/data/config/fleet.yaml:/app/config/fleet.yaml`.
