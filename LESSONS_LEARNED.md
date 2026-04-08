@@ -330,12 +330,26 @@ ssh -p 22222 root@192.168.4.191 "balena restart k3s-rpi5_<uuid>"
 chi-edge device sync soarm101-1
 ```
 
-### `pi_camera` device profile requires CSI devices not present on Pi 5 with USB cameras
-**Symptom:** Container Unschedulable with:  
-`1 Insufficient smarter-devices/vchiq, 1 Insufficient smarter-devices/vcsm-cma, 1 Insufficient smarter-devices/v4l-subdev0, 1 Insufficient smarter-devices/video10-18`  
-**Cause:** The `pi_camera` profile was designed for Pi 4 CSI camera modules. `vchiq`, `vcsm-cma`, and `video10-18` are VideoCore / CSI interface devices. The Pi 5 with USB cameras (Logitech C920) only exposes `video0` and `video1` — the CSI devices don't exist.  
-**Workaround for local network:** Use `balena run` directly with `--device=/dev/video0 --device=/dev/video1 --privileged` — bypasses CHI@Edge scheduling entirely.  
-**Long-term fix needed:** Submit a Chameleon helpdesk ticket requesting a USB-camera-only device profile (e.g. `usb_camera`) that maps to `video0`/`video1` without requiring CSI devices.
+### `pi_camera` profile incompatible with Pi 5 USB cameras; use `video0`/`video1` but mappings must be added by helpdesk
+**Symptom 1 — `pi_camera`:** Container Unschedulable with:  
+`1 Insufficient smarter-devices/vchiq, 1 Insufficient smarter-devices/vcsm-cma, 1 Insufficient smarter-devices/video10-18`  
+**Cause:** `pi_camera` profile was designed for Pi 4 CSI cameras. `vchiq`, `vcsm-cma`, and `video10-18` don't exist on Pi 5 with USB-only cameras.
+
+**Symptom 2 — `video0`/`video1` directly:** Container fails with:  
+`Missing mapping for device_profile 'video0', ensure it has been added to device_profile_mappings.`  
+**Cause:** Like `ttyacm0`/`ttyacm1`, individual video device names must be explicitly registered on the CHI@Edge server side before they can be used.
+
+**Pattern:** CHI@Edge device profiles follow the same convention for all devices — individual lowercase device names (e.g. `ttyacm0`, `video0`) must have server-side mappings added by the Chameleon helpdesk before they work.
+
+**Fix needed:** Submit helpdesk ticket requesting `video0` and `video1` device profile mappings, exactly as was done for `ttyacm0`/`ttyacm1`.
+
+**Workaround for local network:** Use `balena run` directly:
+```bash
+balena run -d --privileged \
+  --device=/dev/video0 --device=/dev/video1 \
+  -v /mnt/data/config/fleet.yaml:/app/config/fleet.yaml \
+  -p 7860:7860 <image_id> coachable preview --robot alpha
+```
 
 ### BalenaOS root filesystem is read-only — use `/mnt/data/` for persistent files
 `/app/` and most of the root filesystem are read-only on BalenaOS. The writable persistent volume is `/mnt/data/`.  

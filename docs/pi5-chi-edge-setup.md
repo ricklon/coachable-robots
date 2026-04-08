@@ -331,30 +331,36 @@ CHI@Edge does **not** support privileged containers. Hardware access is
 granted exclusively via device profiles — there is no `--privileged` or
 `-v /dev:/dev` equivalent. Profiles are specified at container launch time.
 
-| Profile | Exposes |
-|---------|---------|
-| `pi_serial` | `/dev/ttyACM0` only — servo/USB serial |
-| `pi_camera` | `/dev/video0`–`video23` — USB and CSI cameras |
-| `pi_gpio` | GPIO, I2C (`/dev/gpiomem`, `/dev/i2c-1`) |
+| Profile | Exposes | Status |
+|---------|---------|--------|
+| `pi_serial` | `/dev/ttyACM0` only | legacy — use `ttyacm0` directly |
+| `pi_camera` | CSI camera devices (Pi 4 only) | ❌ broken on Pi 5 + USB cameras |
+| `pi_gpio` | GPIO, I2C (`/dev/gpiomem`, `/dev/i2c-1`) | ✅ |
+| `ttyacm0` | `/dev/ttyACM0` | ✅ added by helpdesk |
+| `ttyacm1` | `/dev/ttyACM1` | ✅ added by helpdesk |
+| `video0` | `/dev/video0` | ⏳ pending helpdesk ticket |
+| `video1` | `/dev/video1` | ⏳ pending helpdesk ticket |
+
+> **Pi 5 + USB cameras:** `pi_camera` requires `vchiq`, `vcsm-cma`, and `video10-18` — VideoCore/CSI devices that don't exist on Pi 5. Use individual `video0`/`video1` profile names (same pattern as `ttyacm0`/`ttyacm1`). These require a helpdesk mapping request before they work.
 
 ### SO-ARM101 Two-Arm Constraint
 
 The `pi_serial` profile only exposes `/dev/ttyACM0`. The SO-ARM101 setup
 requires **two serial ports** — leader on `ttyACM0`, follower on `ttyACM1`.
 
-**Action required:** Submit a helpdesk request at
-https://chameleoncloud.org/user/help/ asking for a custom device profile
-that exposes both `/dev/ttyACM0` and `/dev/ttyACM1`. Reference device
-`soarm101-1` and project `CHI-261589`.
+**Resolved:** Pass each port as a separate lowercase entry in `device_profiles`:
 
-Until the custom profile is available, testing can be done by SSHing into
-the container and manually remapping ports, or by running the container
-locally on the Pi with `--privileged`.
+```python
+device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"]
+```
+
+Both `/dev/ttyACM0` and `/dev/ttyACM1` will be exposed in the container.
 
 ### Logitech C920e USB Webcam
 
-The C920e is a standard UVC device and appears on `/dev/video0`. It is
-fully covered by the `pi_camera` profile — no special configuration needed.
+The C920e appears on `/dev/video0`. Use `video0` directly in `device_profiles`
+(not `pi_camera`). The `video0` mapping must first be added via helpdesk ticket
+— same process as `ttyacm0`/`ttyacm1`.
 
 ### Container launch (python-chi)
 
@@ -365,12 +371,12 @@ my_container = Container(
     reservation_id=reservation_id,
     environment={
         "HF_TOKEN": "hf_xxx",
-        "HF_USER": "rianders",
+        "HF_USER": "ricklon",
         "LEADER_PORT": "/dev/ttyACM0",
         "FOLLOWER_PORT": "/dev/ttyACM1",
         "CAMERA_INDEX": "0",
     },
-    device_profiles=["pi_serial", "pi_camera"],
+    device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"],
 )
 ```
 
