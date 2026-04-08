@@ -14,6 +14,7 @@ Or called directly from a notebook:
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -66,21 +67,31 @@ The leader arm is the one you hold and move — calibrate it after the follower.
 # ---------------------------------------------------------------------------
 
 def _open_camera(
-    index: int, width: int, height: int, fps: int
+    index: int, width: int, height: int, fps: int, retries: int = 3, retry_delay: float = 1.0
 ) -> tuple[cv2.VideoCapture | None, int, int, float, str | None]:
-    """Open a camera. Returns (cap, actual_w, actual_h, actual_fps, error_msg)."""
-    # Use device path + CAP_V4L2 for reliable access on Linux/Pi
+    """Open a camera. Returns (cap, actual_w, actual_h, actual_fps, error_msg).
+
+    Retries up to `retries` times with `retry_delay` seconds between attempts.
+    Needed in container environments where V4L2 devices may not be fully
+    initialised at process start (e.g. CHI@Edge smarter-device-manager).
+    """
     device_path = f"/dev/video{index}"
-    cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
-    if not cap.isOpened():
-        return None, width, height, float(fps), f"Cannot open /dev/video{index}"
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    cap.set(cv2.CAP_PROP_FPS, fps)
-    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    actual_fps = cap.get(cv2.CAP_PROP_FPS) or fps
-    return cap, actual_w, actual_h, actual_fps, None
+    for attempt in range(retries):
+        # Use device path + CAP_V4L2 for reliable access on Linux/Pi.
+        # Skip cap.get() after set — on some backends (FFMPEG fallback) those calls
+        # block waiting to read the first frame to determine actual resolution.
+        cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            cap.set(cv2.CAP_PROP_FPS, fps)
+            return cap, width, height, float(fps), None
+        cap.release()
+        if attempt < retries - 1:
+            print(f"  camera /dev/video{index}: not ready, retrying in {retry_delay}s "
+                  f"({attempt + 1}/{retries - 1})...")
+            time.sleep(retry_delay)
+    return None, width, height, float(fps), f"Cannot open /dev/video{index}"
 
 
 def _placeholder_frame(width: int, height: int, label: str, error: str) -> np.ndarray:

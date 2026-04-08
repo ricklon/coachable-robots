@@ -6,12 +6,8 @@
 #   - Logitech C920e USB webcam (/dev/video0)
 #
 # CHI@Edge container — device profiles required (no --privileged):
-#   device_profiles=["pi_serial", "pi_camera"]
-#
-# NOTE: pi_serial only exposes /dev/ttyACM0. Using both leader and follower
-# requires a custom device profile — submit a helpdesk request at:
-#   https://chameleoncloud.org/user/help/
-# Request: "custom pi_serial profile exposing /dev/ttyACM0 and /dev/ttyACM1"
+#   device_profiles=["ttyacm0", "ttyacm1", "pi_camera"]
+# Serial ports are passed as lowercase list entries, not a named profile.
 #
 # Pull pre-built arm64 image (recommended — cross-built on x86 with buildx):
 #   docker pull rianders/lerobot-soarm101:latest
@@ -30,7 +26,7 @@
 #     rianders/lerobot-soarm101:latest
 #
 # Run on CHI@Edge (via python-chi Container API — no privileged):
-#   device_profiles=["pi_serial", "pi_camera"]
+#   device_profiles=["ttyacm0", "ttyacm1", "pi_camera"]
 
 FROM arm64v8/python:3.12-slim-bookworm
 

@@ -212,9 +212,9 @@ Open on **Chameleon JupyterHub** and run cells top to bottom each session.
   - Expected output: a 1280×720 image from the C920e
   - If this fails: check the Pi is powered, camera is plugged in, `pi_camera` profile is set
 
-**Data collection** *(pending dual-serial helpdesk response)*
-- Requires custom device profile exposing both `ttyACM0` and `ttyACM1`
-- Until then: run `bash scripts/collect_demos.sh` locally on the Pi with `--privileged`
+**Data collection**
+- Both serial ports exposed via `device_profiles=["ttyacm0", "ttyacm1", "pi_camera"]`
+- Helpdesk confirmed: pass each port as a lowercase list entry (not a custom named profile)
 
 **Cleanup cell** (optional — lease persists 7 days)
 - Prompts for confirmation before deleting the container

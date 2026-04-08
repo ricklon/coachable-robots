@@ -18,7 +18,7 @@ fleet:
       follower_port: /dev/ttyACM1
       cameras:                       # named cameras → /dev/video{N}
         top: 0                       # overhead/top camera
-        gripper: 1                   # wrist/gripper camera
+        gripper: 2                   # wrist/gripper camera (/dev/video2 — NOT video1, which is C920 metadata)
       camera_config:                 # per-camera resolution/fps (optional, defaults: 1280x720@30 MJPG)
         top:     {width: 1280, height: 720, fps: 30, fourcc: MJPG}
         gripper: {width: 1024, height: 768, fps: 30, fourcc: MJPG}

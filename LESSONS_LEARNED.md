@@ -430,6 +430,101 @@ Mount into containers with `-v /mnt/data/config/fleet.yaml:/app/config/fleet.yam
 
 ---
 
+## OpenCV Camera Access
+
+### OpenCV V4L2 requires device path — integer index fails silently on Pi 5
+**Problem:** `cv2.VideoCapture(0)` returns a capture object with `isOpened() == False` on Pi 5 with BalenaOS.  
+**Fix:** Use device path with explicit backend:
+```python
+cap = cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)
+```
+Integer index 0 silently fails. Device path + `CAP_V4L2` is reliable on Linux/Pi.
+
+### `cap.get()` blocks indefinitely when V4L2 falls back to FFMPEG
+**Symptom:** Preview hangs after `cap.set()` calls — no frames, no error.  
+**Cause:** When `cv2.VideoCapture` is called with a device path and V4L2 can't use it, OpenCV falls back to FFMPEG. The FFMPEG backend must read the first frame to determine actual resolution, so `cap.get(CAP_PROP_FRAME_WIDTH)` blocks until a frame arrives.  
+**Fix:** Skip `cap.get()` calls after opening. Return the requested values directly — they're close enough for the UI:
+```python
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+cap.set(cv2.CAP_PROP_FPS, fps)
+return cap, width, height, float(fps), None  # don't cap.get() here
+```
+
+### CHI@Edge smarter-device-manager binds V4L2 devices with a delay at container start
+**Symptom:** `cv2.VideoCapture("/dev/video0", cv2.CAP_V4L2)` fails with "Cannot open /dev/video0" during startup, but the same call succeeds when tested in isolation a few seconds later. Warning in logs:
+```
+VIDEOIO(V4L2): backend is generally available but can't be used to capture by name
+```
+**Cause:** The smarter-device-manager binds the device node to the container, but the V4L2 device may not be fully initialised by the time the process opens it. Devices opened later in the sequence (e.g. `/dev/video2`) succeed because the startup overhead from the first attempt gives them time.  
+**Fix:** Retry loop in `_open_camera` (3 attempts, 1s apart):
+```python
+for attempt in range(retries):
+    cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
+    if cap.isOpened():
+        ...
+        return cap, ...
+    cap.release()
+    time.sleep(retry_delay)
+return None, ..., f"Cannot open /dev/video{index}"
+```
+
+### Per-camera resolution config is required — gripper camera doesn't support 1280×720 at 30fps
+**Problem:** lerobot-record validates that `actual_fps == requested_fps` exactly. The gripper camera (generic USB) only supports 30fps at 1024×768, not 1280×720. Using the C920 resolution for all cameras causes fps mismatch failure.  
+**Fix:** Added `camera_config` block to `fleet.yaml` and `Robot` dataclass:
+```yaml
+camera_config:
+  top:     {width: 1280, height: 720,  fps: 30, fourcc: MJPG}
+  gripper: {width: 1024, height: 768,  fps: 30, fourcc: MJPG}
+```
+`lerobot_cli.py` `record()` reads per-camera config from `robot.camera_config`. Check `v4l2-ctl --device=/dev/videoN --list-formats-ext` for supported modes.
+
+---
+
+## CHI@Edge Container Access
+
+### Port 7860 is blocked on CHI@Edge floating IPs — use SSH tunnel through the Pi
+**Problem:** Gradio is running inside the container on port 7860, but the floating IP security group doesn't allow inbound 7860. Direct `http://<floating-ip>:7860` is unreachable.  
+**Fix:** The Pi is on the same LAN as the container's internal IP (`100.64.x.x` caliconet). Tunnel through the Pi:
+```bash
+ssh -p 22222 -L 7860:100.64.84.204:7860 -fN root@192.168.4.191
+# Then open http://localhost:7860
+```
+The container's internal IP (`100.64.84.204`) is reachable from the Pi host but not from the internet.
+
+### Local machine cannot call CHI@Edge Blazar/Zun API without CHI@Edge credentials
+**Problem:** `chi.use_site("CHI@Edge")` + `chi.set("project_name", ...)` fails locally with keystoneauth errors. The KVM@TACC application credential (`~/Downloads/app-cred-*-openrc.sh`) does not work for CHI@Edge.  
+**Cause:** Application credentials are site-scoped. The Chameleon JupyterHub has token-based SSO that works on all sites; local machines need site-specific credentials.  
+**Fix:** Container management (create/delete/execute) must be done from:
+- The Chameleon JupyterHub notebook, OR
+- A local machine with a CHI@Edge application credential
+
+### `balena run -it` fails in non-interactive scripts — use `-i` + stdin pipe
+**Problem:** `balena run -it ...` in a script or SSH session produces "the input device is not a TTY".  
+**Fix:** Replace `-it` with `-i` and pipe a newline to satisfy any `input()` prompts:
+```bash
+echo '' | balena run -i --privileged ...
+```
+Needed because `lerobot-record` calls `input()` during `teleop.connect()` to confirm leader arm calibration.
+
+### `sleep infinity` vs preview command as container CMD
+**Pattern:** Two valid approaches for long-running CHI@Edge containers:
+
+1. **`sleep infinity` + execute()** — easier to debug; run commands on demand:
+   ```python
+   command=["sleep", "infinity"]
+   # then:
+   my_container.execute("bash -c 'coachable preview ...'")
+   ```
+2. **Direct preview command** — auto-starts on container creation; logs go to `/tmp/preview.log`:
+   ```python
+   command=["bash", "-c",
+            "coachable preview --robot alpha --port 7860 > /tmp/preview.log 2>&1; sleep infinity"]
+   ```
+   The trailing `sleep infinity` keeps the container alive if Gradio exits unexpectedly.
+
+---
+
 ## Coachable CLI Reference
 
 All commands run inside the Docker container on the Pi (or any node with the image).
