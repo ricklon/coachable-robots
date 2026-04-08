@@ -17,8 +17,8 @@ Pi enrolled on CHI@Edge, arms calibrated and verified, full collect→replay→p
 - HF account: ricklon (not rianders — rianders is Docker Hub only)
 - Docker image: rianders/lerobot-soarm101:latest (needs rebuild for speech-dispatcher fix)
 
-## Pending — CHI@Edge
-- Helpdesk ticket submitted (2026-04-06): requesting custom `pi_serial_dual` device profile exposing both /dev/ttyACM0 and /dev/ttyACM1. Currently pi_serial only exposes ttyACM0.
+## CHI@Edge — dual serial resolved
+- Helpdesk confirmed (2026-04-07): pass `["ttyacm0","ttyacm1"]` in `device_profiles` to expose both ports. No custom profile needed. Notebook and docs updated.
 
 ## In progress — KVM@TACC control node
 Provisioning notebook and Ansible playbook built (ControlNode_Setup.ipynb + ansible/playbooks/setup_control_node.yml). Next steps to run it:

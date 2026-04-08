@@ -64,13 +64,18 @@ lerobot-calibrate --robot.type=so101_follower --robot.port=/dev/ttyACM1
 
 ## CHI@Edge Device Profiles
 
-### `pi_serial` only exposes `/dev/ttyACM0`
+### Dual serial ports: pass `["ttyacm0","ttyacm1"]` in `device_profiles`
 **Problem:** The SO-ARM101 setup needs two serial ports — leader on `ttyACM0`, follower on `ttyACM1`. The `pi_serial` device profile only whitelists `ttyACM0`.  
-**Status:** Helpdesk ticket submitted requesting a custom profile that exposes both.  
-**Workaround for local testing:** Run with `--privileged -v /dev:/dev`.
+**Fix (confirmed by Chameleon helpdesk):** Pass each port as a lowercase list entry in `device_profiles`:
+```python
+device_profiles=["ttyacm0", "ttyacm1", "pi_camera"]
+```
+No custom named profile needed — the port names themselves are valid profile entries.
 
 ### Available CHI@Edge device profiles for Raspberry Pi
-- `pi_serial` → `/dev/ttyACM0` only
+- `ttyacm0` → `/dev/ttyACM0` (individual serial port entry)
+- `ttyacm1` → `/dev/ttyACM1` (individual serial port entry)
+- `pi_serial` → `/dev/ttyACM0` only (legacy; use `ttyacm0`/`ttyacm1` directly instead)
 - `pi_camera` → `/dev/video*` + memory devices
 - `pi_gpio` → `/dev/gpiomem`, `/dev/i2c-1`, `/dev/gpiochip0/1`
 - `pi_meter` → `/dev/ttyUSB0`
@@ -268,3 +273,44 @@ See `scripts/push_dataset.sh` for the full implementation.
 
 ### HF tokens shown in screenshots are immediately auto-revoked
 HuggingFace's security system detects token strings in public content and immediately revokes them. If a token appears in a screenshot, log, or shared file, treat it as compromised and rotate immediately at https://huggingface.co/settings/tokens.
+
+---
+
+## CHI@Edge Remote Access
+
+### Notebook needs a reconnect cell — container creation deletes existing containers
+The `create-container` cell deletes any existing container before recreating it. Reopening the notebook in a new session and running top-to-bottom destroys running work.  
+**Fix:** Added a "Reconnect to existing session" cell at the top of `Request_LeRobot_SOARM101.ipynb` that looks up `my_lease` and `my_container` by name and prints the floating IP without touching anything.
+
+### `chi.set("project_name", ...)` breaks authentication with application credentials
+Application credentials in OpenStack v3 are already project-scoped. Adding `chi.set("project_name", "CHI-261589")` causes keystoneauth to require `project_domain_id` or `project_domain_name`, which then fails.  
+**Fix:** Omit `chi.set("project_name", ...)` entirely when using application credentials.
+
+### python-chi 0.15.x uses functional API; notebooks require 1.0+ class-based API
+`from chi.container import Container` only exists in python-chi 1.0+. Local installs typically have 0.15.x.  
+**Fix:** Upgrade locally:
+```bash
+pip install --upgrade python-chi --break-system-packages
+```
+**Note:** `python-chi-edge 0.2.4` pins `python-chi<0.16.0` — it becomes incompatible after upgrade. This is acceptable since chi-edge CLI is used separately.
+
+### CHI@Edge container network is `caliconet`, not `containernet1`
+`create_container()` defaults to `network_name="containernet1"` which doesn't exist on CHI@Edge.  
+**Fix:** Pass `network_name="caliconet"` explicitly. Available networks: `public` and `caliconet`.
+
+### "Unschedulable" containers = Pi k8s node is NotReady
+When a container lands in `Error` status with `status_detail: Unschedulable`, the Pi's Kubernetes node is not ready — not a code problem.  
+**Diagnosis:**
+```bash
+chi-edge device show soarm101-1
+# Check 'last_seen' timestamp in balena health — if days old, Pi is offline
+```
+**Fix:** Power cycle the Pi, confirm Ethernet is connected, wait 5-10 min for k8s to rejoin. Then:
+```bash
+chi-edge device sync soarm101-1
+# Wait ~90s, then re-check all states are STEADY
+```
+
+### CHI@Edge openrc lives in `ansible/`, not `~/Downloads/`
+The correct credential file for CHI@Edge is `ansible/app-cred-chi-edge-openrc.sh`.  
+`~/Downloads/app-cred-coachable-robots-openrc.sh` and `app-cred-kvm-tacc-openrc.sh` are both KVM@TACC credentials despite their names.
