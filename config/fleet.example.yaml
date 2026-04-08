@@ -16,15 +16,18 @@ fleet:
       type: so101                    # robot type (so101, car, etc.)
       leader_port: /dev/ttyACM0
       follower_port: /dev/ttyACM1
-      camera_index: 0                # /dev/video0
+      cameras:                       # named cameras → /dev/video{N}
+        top: 0                       # overhead/top camera
+        gripper: 1                   # wrist/gripper camera
       coach: alice                   # name of assigned coach (from coaches list)
       status: available              # available | in_use | offline
 
+    # Single-camera robot (old format still supported for backwards compat)
     - name: beta
       type: so101
       leader_port: /dev/ttyACM2
       follower_port: /dev/ttyACM3
-      camera_index: 2
+      camera_index: 2                # legacy: equivalent to cameras: {top: 2}
       coach: null                    # unassigned
       status: available
 

@@ -21,9 +21,14 @@ class Robot:
     type: str                    # "so101", "car", etc.
     leader_port: str             # /dev/ttyACM0
     follower_port: str           # /dev/ttyACM1
-    camera_index: int            # /dev/video{camera_index}
+    cameras: dict[str, int]      # {"top": 0, "gripper": 1} → /dev/video{N}
     coach: str | None            # name of assigned coach (or None)
     status: str                  # "available" | "in_use" | "offline"
+
+    @property
+    def camera_index(self) -> int:
+        """Backwards-compat shim: returns the 'top' camera index, or the first."""
+        return self.cameras.get("top", next(iter(self.cameras.values())))
 
 
 @dataclass
@@ -59,7 +64,11 @@ def load_fleet(path: Path = DEFAULT_FLEET_PATH) -> FleetConfig:
             type=r.get("type", "so101"),
             leader_port=r.get("leader_port", "/dev/ttyACM0"),
             follower_port=r.get("follower_port", "/dev/ttyACM1"),
-            camera_index=r.get("camera_index", 0),
+            cameras=(
+                {k: int(v) for k, v in r["cameras"].items()}
+                if "cameras" in r
+                else {"top": int(r.get("camera_index", 0))}
+            ),
             coach=r.get("coach"),
             status=r.get("status", "available"),
         )
