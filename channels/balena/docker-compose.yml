@@ -1,0 +1,43 @@
+# channels/balena/docker-compose.yml — Balena multi-service app definition
+#
+# Deploy: cd channels/balena && balena push <app-name>
+#
+# Services:
+#   robot   — main process container (data collection, inference, calibration)
+#
+# The `robot` service uses the same app image as chi-edge — apples-to-apples.
+# Gradio preview is on port 7860 in all channels.
+#
+# Environment variables (set in balena dashboard or .env):
+#   HF_TOKEN   — HuggingFace API token
+#   HF_USER    — HuggingFace username
+
+version: "2.4"
+
+services:
+  robot:
+    build:
+      context: ../..
+      dockerfile: channels/balena/Dockerfile
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - robot-data:/app/data
+      - robot-checkpoints:/app/checkpoints
+      - robot-calibration:/app/calibration
+    environment:
+      - HF_TOKEN
+      - HF_USER
+      - LEADER_PORT=/dev/ttyACM0
+      - FOLLOWER_PORT=/dev/ttyACM1
+      - CAMERA_INDEX=0
+    ports:
+      - "7860:7860"
+    labels:
+      io.balena.features.supervisor-api: "1"
+    restart: unless-stopped
+
+volumes:
+  robot-data:
+  robot-checkpoints:
+  robot-calibration:

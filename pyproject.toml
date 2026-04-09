@@ -12,6 +12,9 @@ dependencies = [
     "gradio>=4.0",
     "opencv-python-headless>=4.8",
     "huggingface-hub[hf_xet]>=0.23",
+    "python-chi>=1.0",
+    "python-blazarclient>=4.5",
+    "python-zunclient @ git+https://github.com/ChameleonCloud/python-zunclient.git",
 ]
 
 [project.scripts]

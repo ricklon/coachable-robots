@@ -120,13 +120,15 @@ def run_policy(
 ) -> subprocess.CompletedProcess:
     """Run a trained policy on a robot station."""
     cameras = {
-        "webcam": {
+        cam_name: {
             "type": "opencv",
-            "index_or_path": robot.camera_index,
-            "width": 640,
-            "height": 480,
-            "fps": fps,
+            "index_or_path": cam_idx,
+            "width":  robot.camera_config.get(cam_name, {}).get("width",  640),
+            "height": robot.camera_config.get(cam_name, {}).get("height", 480),
+            "fps":    robot.camera_config.get(cam_name, {}).get("fps",    fps),
+            "fourcc": robot.camera_config.get(cam_name, {}).get("fourcc", "MJPG"),
         }
+        for cam_name, cam_idx in robot.cameras.items()
     }
 
     cmd = [

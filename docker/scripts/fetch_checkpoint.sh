@@ -17,8 +17,8 @@ if [ -z "${HF_TOKEN:-}" ]; then
 fi
 
 echo "Fetching checkpoint from ${MODEL_REPO}..."
-huggingface-cli login --token "$HF_TOKEN"
-huggingface-cli download "${MODEL_REPO}" --local-dir "${LOCAL_DIR}"
+python3 -m huggingface_hub login --token "$HF_TOKEN"
+python3 -m huggingface_hub download "${MODEL_REPO}" --local-dir "${LOCAL_DIR}"
 
 echo ""
 echo "Checkpoint ready at ${LOCAL_DIR}"

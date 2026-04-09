@@ -1,6 +1,10 @@
 #!/bin/bash
 # collect_demos.sh — Teleoperate SO-ARM101 and record demonstration episodes
 #
+# Camera setup:
+#   top    — Logitech C920e  (/dev/video0) 1280x720 @ 30fps YUYV
+#   gripper — SVPRO OV2710 fisheye (/dev/video2) 1920x1080 @ 30fps MJPG, FOV 150°
+#
 # Usage: bash scripts/collect_demos.sh [dataset_name] [num_episodes] [task_description]
 #
 # Examples:
@@ -12,13 +16,7 @@
 #   HF_TOKEN       HuggingFace token (required for push; optional for sim dry-run)
 #   LEADER_PORT    Leader arm serial port (default /dev/ttyACM0)
 #   FOLLOWER_PORT  Follower arm serial port (default /dev/ttyACM1)
-#   CAMERA_INDEX   USB webcam index (default 0, i.e. /dev/video0)
-#   USE_SIM        Set to 1 to run a pipeline dry-run (HF pull + training check, no hardware)
-#
-# Note on USE_SIM=1:
-#   lerobot v0.5.0 removed sim robot types from lerobot-record. USE_SIM mode now
-#   validates the full pipeline by pulling a public SO-101 dataset from HF Hub and
-#   verifying the training entrypoint — no real arms or cameras required.
+#   USE_SIM        Set to 1 to run a pipeline dry-run (no hardware)
 set -euo pipefail
 
 DATASET_NAME=${1:-"soarm101_demos"}
@@ -27,7 +25,6 @@ TASK_DESC=${3:-"Pick up the object and place it in the target location"}
 
 LEADER_PORT=${LEADER_PORT:-/dev/ttyACM0}
 FOLLOWER_PORT=${FOLLOWER_PORT:-/dev/ttyACM1}
-CAMERA_INDEX=${CAMERA_INDEX:-0}
 USE_SIM=${USE_SIM:-0}
 
 if [ -z "${HF_USER:-}" ]; then
@@ -43,13 +40,10 @@ echo "Mode:     $([ "$USE_SIM" = "1" ] && echo "DRY-RUN (pipeline validation, no
 echo ""
 
 if [ "$USE_SIM" = "1" ]; then
-    # ── Dry-run mode: validate full pipeline without hardware ──
-    # Pulls a public SO-101 dataset and verifies the training entrypoint.
-    # HF_TOKEN optional (public dataset); set it to also test auth.
     echo "Dry-run: validating HF access and training entrypoint..."
 
     if [ -n "${HF_TOKEN:-}" ]; then
-        huggingface-cli login --token "$HF_TOKEN"
+        python3 -m huggingface_hub login --token "$HF_TOKEN"
         echo "HF auth: OK"
     fi
 
@@ -72,54 +66,76 @@ print('lerobot-train entrypoint: OK')
     exit 0
 fi
 
-# ── Real hardware mode requires HF credentials ──
+# ── Real hardware mode ──────────────────────────────────────────────────────────
+
 if [ -z "${HF_TOKEN:-}" ]; then
     echo "ERROR: HF_TOKEN environment variable is not set."
     exit 1
 fi
 
-# Authenticate HuggingFace
-huggingface-cli login --token "$HF_TOKEN"
+python3 -m huggingface_hub login --token "$HF_TOKEN"
 
-    # ── Real hardware mode (SO-ARM101 leader + follower + C920e) ──
-
-    # Verify serial ports
-    for port in "$LEADER_PORT" "$FOLLOWER_PORT"; do
-        if [ ! -e "$port" ]; then
-            echo "ERROR: $port not found."
-            echo "  Check USB connections: ls /dev/ttyACM*"
-            echo "  Tip: set USE_SIM=1 to run without hardware"
-            exit 1
-        fi
-    done
-
-    # Verify webcam
-    if [ ! -e "/dev/video${CAMERA_INDEX}" ]; then
-        echo "ERROR: /dev/video${CAMERA_INDEX} not found."
-        echo "  Check USB camera: ls /dev/video*"
+# Verify serial ports
+for port in "$LEADER_PORT" "$FOLLOWER_PORT"; do
+    if [ ! -e "$port" ]; then
+        echo "ERROR: $port not found. Check USB connections: ls /dev/ttyACM*"
         exit 1
     fi
+done
 
-    echo "Leader:   ${LEADER_PORT}"
-    echo "Follower: ${FOLLOWER_PORT}"
-    echo "Camera:   /dev/video${CAMERA_INDEX} (Logitech C920e)"
-    echo ""
+# Verify cameras
+if [ ! -e "/dev/video0" ]; then
+    echo "ERROR: /dev/video0 not found (top camera — Logitech C920e)"
+    exit 1
+fi
+if [ ! -e "/dev/video2" ]; then
+    echo "ERROR: /dev/video2 not found (gripper camera — SVPRO OV2710)"
+    exit 1
+fi
 
-    lerobot-record \
-        --robot.type=so101_follower \
-        --robot.port="$FOLLOWER_PORT" \
-        --robot.id=follower_arm \
-        --robot.cameras="{ webcam: {type: opencv, index_or_path: ${CAMERA_INDEX}, width: 1280, height: 720, fps: 30} }" \
-        --teleop.type=so101_leader \
-        --teleop.port="$LEADER_PORT" \
-        --teleop.id=leader_arm \
-        --dataset.repo_id="${HF_USER}/${DATASET_NAME}" \
-        --dataset.num_episodes="${NUM_EPISODES}" \
-        --dataset.single_task="${TASK_DESC}" \
-        --dataset.episode_time_s=30 \
-        --dataset.reset_time_s=10 \
-        --dataset.fps=30 \
-        --dataset.push_to_hub=true
+# Configure OV2710 gripper camera: disable dynamic framerate, max backlight compensation
+# Must be done before lerobot-record opens the device
+echo "Configuring gripper camera (OV2710)..."
+v4l2-ctl --device=/dev/video2 \
+    --set-ctrl=exposure_dynamic_framerate=0 \
+    --set-ctrl=backlight_compensation=2 2>/dev/null || true
+
+echo "Leader:    ${LEADER_PORT}"
+echo "Follower:  ${FOLLOWER_PORT}"
+echo "Top cam:   /dev/video0  (C920e — 1280x720 @ 30fps)"
+echo "Gripper:   /dev/video2  (OV2710 — 1920x1080 @ 30fps MJPG, 150° fisheye)"
+echo ""
+
+lerobot-record \
+    --robot.type=so101_follower \
+    --robot.port="$FOLLOWER_PORT" \
+    --robot.id=follower_arm \
+    --robot.cameras="{
+        top: {
+            type: opencv,
+            index_or_path: 0,
+            width: 1280,
+            height: 720,
+            fps: 30
+        },
+        gripper: {
+            type: opencv,
+            index_or_path: 2,
+            width: 1920,
+            height: 1080,
+            fps: 30
+        }
+    }" \
+    --teleop.type=so101_leader \
+    --teleop.port="$LEADER_PORT" \
+    --teleop.id=leader_arm \
+    --dataset.repo_id="${HF_USER}/${DATASET_NAME}" \
+    --dataset.num_episodes="${NUM_EPISODES}" \
+    --dataset.single_task="${TASK_DESC}" \
+    --dataset.episode_time_s=30 \
+    --dataset.reset_time_s=10 \
+    --dataset.fps=30 \
+    --dataset.push_to_hub=true
 
 echo ""
 echo "Done! Dataset at: https://huggingface.co/datasets/${HF_USER}/${DATASET_NAME}"

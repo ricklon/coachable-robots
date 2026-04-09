@@ -1,0 +1,82 @@
+# DEPRECATED — use channels/local/docker-compose.yml (no build needed)
+#              or channels/balena/Dockerfile for balena deployments
+# This file is kept for reference during the transition to the channels/ structure.
+#
+# Dockerfile.local — Local / Balena OS variant for SO-ARM101
+#
+# Differences from Dockerfile.pi (CHI@Edge):
+#   - No openssh-server (host OS provides SSH)
+#   - No entrypoint.sh (no sshd startup)
+#   - Adds gradio for local preview dashboard
+#   - CMD starts the Gradio preview instead of sleep
+#
+# Build locally (native arm64 on Pi, or x86 with buildx):
+#   docker buildx build --platform linux/arm64 --load \
+#     -t rianders/lerobot-soarm101-local:latest -f docker/Dockerfile.local .
+#
+# Run locally:
+#   docker run -it --privileged -v /dev:/dev \
+#     -p 7860:7860 \
+#     -e HF_TOKEN=hf_xxx -e HF_USER=rianders \
+#     rianders/lerobot-soarm101-local:latest
+
+FROM arm64v8/python:3.12-slim-bookworm
+
+# System deps: USB serial, V4L2 cameras, video encoding
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libusb-1.0-0 \
+    usbutils \
+    v4l-utils \
+    curl \
+    build-essential \
+    linux-libc-dev \
+    speech-dispatcher \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# CPU-only PyTorch (Pi 5 has no GPU)
+RUN uv pip install --system --no-cache \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# LeRobot v0.5.0 with Feetech servo support (SO-ARM101 uses STS3215)
+RUN git clone https://github.com/huggingface/lerobot.git /app/lerobot \
+    && cd /app/lerobot \
+    && git checkout v0.5.0 \
+    && uv pip install --system --no-cache -e '.[feetech]'
+
+# Install coachable package (fleet management + coaching CLI)
+COPY pyproject.toml README.md /app/coachable-robots/
+COPY src/ /app/coachable-robots/src/
+RUN uv pip install --system --no-cache -e /app/coachable-robots
+
+# HuggingFace CLI
+RUN pip install --no-cache-dir "huggingface-hub[hf_xet,cli]"
+
+# Scripts
+COPY docker/scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.sh 2>/dev/null || true
+
+# Fleet config
+COPY config/fleet.example.yaml /app/config/fleet.yaml
+RUN mkdir -p /app/calibration /app/data /app/checkpoints
+
+ENV HF_LEROBOT_HOME="/app"
+ENV FLEET_CONFIG="/app/config/fleet.yaml"
+ENV LEADER_PORT="/dev/ttyACM0"
+ENV FOLLOWER_PORT="/dev/ttyACM1"
+ENV CAMERA_INDEX="0"
+
+# Gradio preview on port 7860
+EXPOSE 7860
+
+CMD ["/bin/bash"]
