@@ -51,8 +51,12 @@ def check_chameleon() -> dict:
 
     try:
         import chi
-        chi.use_site("CHI@TACC")
+        region   = os.getenv("OS_REGION_NAME", "CHI@TACC")
+        domain   = os.getenv("OS_PROJECT_DOMAIN_NAME", "chameleon")
+        _site_map = {"CHI@TACC": "CHI@TACC", "CHI@UC": "CHI@UC", "CHI@Edge": "CHI@Edge"}
+        chi.use_site(_site_map.get(region, "CHI@TACC"))
         chi.set("project_name", project)
+        chi.set("project_domain_name", domain)
         # Attempt a lightweight API call — list leases
         from chi import lease
         leases = lease.list_leases()
