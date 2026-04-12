@@ -48,7 +48,78 @@
           - build-essential
           - ffmpeg
           - openssh-client
+          - ca-certificates
+          - gnupg
+          - lsb-release
         state: present
+
+    # ── GitHub CLI (gh) ──
+    - name: Add GitHub CLI GPG key
+      shell: |
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/githubcli-archive-keyring.gpg
+
+    - name: Add GitHub CLI apt repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
+          https://cli.github.com/packages stable main" \
+          > /etc/apt/sources.list.d/github-cli.list
+      args:
+        creates: /etc/apt/sources.list.d/github-cli.list
+
+    - name: Install gh CLI
+      apt:
+        name: gh
+        update_cache: true
+        state: present
+
+    # ── Docker CE + buildx (for building Pi arm64 images) ──
+    - name: Add Docker GPG key
+      shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+          | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker apt repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+          https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+          > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Install Docker CE and buildx
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+        update_cache: true
+        state: present
+
+    - name: Add cc user to docker group
+      user:
+        name: cc
+        groups: docker
+        append: true
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Create buildx builder for multi-platform (arm64)
+      command: docker buildx create --name multiarch --driver docker-container --bootstrap --use
+      become: false
+      ignore_errors: true  # idempotent — fails harmlessly if already exists
 
     # ── uv (Python package manager) ──
     - name: Check if uv is installed
@@ -111,14 +182,22 @@
         state: present
       become: false
 
-    # ── Install coachable package ──
-    - name: Install coachable package with uv
+    # ── Install coachable package and all project deps via uv sync ──
+    - name: Install project dependencies with uv sync (includes Chameleon zunclient fork)
       command: >
-        {{ cc_home }}/.local/bin/uv pip install --python {{ cc_home }}/.venv/bin/python --no-cache
-        -e {{ repo_dest }}
+        {{ cc_home }}/.local/bin/uv sync --python {{ cc_home }}/.venv/bin/python
+      args:
+        chdir: "{{ repo_dest }}"
       become: false
       register: coachable_install
       changed_when: "'already satisfied' not in coachable_install.stdout"
+
+    # ── ansible (for vault and playbook use from this node) ──
+    - name: Install ansible as a uv tool
+      command: "{{ cc_home }}/.local/bin/uv tool install ansible"
+      become: false
+      register: ansible_install
+      changed_when: "'already installed' not in ansible_install.stdout"
 
     # ── HuggingFace CLI ──
     - name: Install HuggingFace CLI
@@ -163,7 +242,7 @@
         group: cc
         mode: "0600"
         content: |
-          c.ServerApp.ip = '127.0.0.1'
+          c.ServerApp.ip = '0.0.0.0'
           c.ServerApp.port = {{ jupyter_port }}
           c.ServerApp.open_browser = False
           c.ServerApp.notebook_dir = '{{ cc_home }}/coachable-robots'
