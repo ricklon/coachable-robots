@@ -41,6 +41,7 @@ def run(args) -> None:
     from coachable.camera_preview import launch
     launch(
         cameras=cameras,
+        camera_config=robot.camera_config if robot else {},
         port=args.port,
         width=args.width,
         height=args.height,

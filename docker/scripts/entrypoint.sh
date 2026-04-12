@@ -1,0 +1,34 @@
+#!/bin/bash
+# entrypoint.sh — container startup for CHI@Edge SO-ARM101 container
+#
+# Starts sshd so the container is reachable at the floating IP.
+# Pass SSH_PUBKEY env var to inject an authorized key for the root user.
+#
+# Usage (normal):  CMD in Dockerfile calls this, then falls through to CMD
+# Usage (override): docker run ... rianders/lerobot-soarm101 bash
+
+set -e
+
+# ── SSH daemon ──
+mkdir -p /run/sshd /root/.ssh
+chmod 700 /root/.ssh
+
+# Inject authorized key if provided at runtime
+if [ -n "${SSH_PUBKEY:-}" ]; then
+    echo "$SSH_PUBKEY" >> /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
+fi
+
+# Allow root login; disable password auth (key-only)
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/'          /etc/ssh/sshd_config
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    /etc/ssh/sshd_config
+
+# Generate host keys if missing (first boot)
+ssh-keygen -A
+
+/usr/sbin/sshd
+echo "[entrypoint] sshd started — SSH available on port 22"
+
+# ── Fall through to CMD ──
+exec "$@"

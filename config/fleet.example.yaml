@@ -17,16 +17,29 @@ fleet:
       leader_port: /dev/ttyACM0
       follower_port: /dev/ttyACM1
       cameras:                       # named cameras → /dev/video{N}
-        top: 0                       # overhead/top camera
-        gripper: 2                   # wrist/gripper camera (/dev/video2 — NOT video1, which is C920 metadata)
-      camera_config:                 # per-camera resolution/fps (optional, defaults: 1280x720@30 MJPG)
-        top:     {width: 1280, height: 720, fps: 30, fourcc: MJPG}
-        gripper: {width: 1024, height: 768, fps: 30, fourcc: MJPG}
-        # Note: check camera capabilities with: v4l2-ctl --device=/dev/videoN --list-formats-ext
+        top: 0                       # Logitech C920e — /dev/video0
+        gripper: 2                   # SVPRO OV2710 fisheye — /dev/video2
+                                     # Note: video1 and video3 are UVC metadata nodes, not capture
+      camera_config:
+        top:
+          width: 1280
+          height: 720
+          fps: 30
+          fourcc: YUYV               # C920e: YUYV at 720p gives best color accuracy
+        gripper:
+          width: 1920
+          height: 1080
+          fps: 30
+          fourcc: MJPG               # OV2710: must use MJPG — YUYV is only 6fps at 1080p
+          # Hardware: SVPRO USB Camera Board, OV2710 sensor, 150° FOV fisheye lens
+          # v4l2 setup required before capture:
+          #   v4l2-ctl --device=/dev/video2 \
+          #     --set-ctrl=exposure_dynamic_framerate=0 \
+          #     --set-ctrl=backlight_compensation=2
       coach: alice                   # name of assigned coach (from coaches list)
       status: available              # available | in_use | offline
 
-    # Single-camera robot (old format still supported for backwards compat)
+    # Single-camera robot (old format still supported)
     - name: beta
       type: so101
       leader_port: /dev/ttyACM2

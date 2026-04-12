@@ -28,6 +28,141 @@ The project serves dual purposes: a functional robotics training pipeline and a 
         └────────────────────────────────────────────────────────┘
 ```
 
+## Role Model
+
+Three distinct roles, each with a dedicated interface:
+
+| Role | Interface | Who / What |
+|---|---|---|
+| **Operator** | `just` CLI | Human or AI agent |
+| **System** | Ansible + chi API | Called by operator via `just` |
+| **Teacher / Student** | `notebooks/` | Humans only |
+
+**Agents operate exclusively via `just`.** Every `just` recipe is non-interactive — no `input()` prompts, predictable exit codes, JSON output available. Agents should never touch notebooks directly; they can execute them as acceptance tests via `just verify-*`.
+
+**Notebooks are the teacher/student experience.** They are authored by humans, executed by students, and verified by operators via `just verify-*`. Claude Code may execute notebooks to verify workflows but must never author or modify their content.
+
+## Agent Operations
+
+Agents (Claude Code or other) operate the system through `just`. The canonical agent workflow:
+
+```bash
+# Bootstrap (one-time per machine)
+echo 'vault-password' > ansible/.vault_pass && chmod 600 ansible/.vault_pass
+just vault-to-env          # decrypt vault → write .env + SSH keys
+
+# Verify environment
+just check-auth            # live credential check (exits 1 on failure)
+just check-auth-json       # same, machine-readable output
+
+# Infrastructure
+just reserve               # non-interactive lease + server + inventory
+just provision             # Ansible: ROCm + LeRobot on training node
+just node-status           # JSON state: lease, server, floating_ip, ssh_ready
+
+# Health checks
+just test-node             # GPU + ROCm + PyTorch on MI100
+just test-pi               # serial ports + cameras + containers on Pi
+just test-all              # auth + node + pi combined
+just ready                 # test-all + verify-all (full readiness)
+
+# Benchmarks
+just bench-inference-node  # run benchmark_inference.py on MI100, save JSON
+just bench-inference-pi    # run on Pi
+just bench-inference-local # run locally
+just bench-inference-remote host=cc@<ip> tag=h100   # arbitrary remote target
+just bench-all             # all targets + summary table
+just bench-summary         # compare latest results across tags
+
+# Release (requires COACHABLE_CONFIRM_RELEASE=yes)
+COACHABLE_CONFIRM_RELEASE=yes just release
+```
+
+### Agent Auth Prerequisites
+
+Before an agent can operate, the machine needs:
+1. `ansible/.vault_pass` — the vault decryption password (injected by human or CI secret)
+2. `~/.ssh/id_rsa` — SSH key for Chameleon nodes (written by `just vault-to-env`)
+
+Everything else derives from these two inputs. `just vault-to-env` is the bootstrap step.
+
+### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Error (auth failure, missing config, command failed) |
+| `2` | Partial state (e.g. `node-status`: lease exists but SSH not ready) |
+
+### Benchmark Multi-Target Pattern
+
+`bench/benchmark_inference.py` runs on the local machine and auto-detects the device.
+Call it via SSH for remote targets. Results are tagged by device name:
+
+```
+bench/results/bench_inference_mi100_20260412_143022.json
+bench/results/bench_inference_h100_20260412_150011.json
+bench/results/bench_inference_pi5_20260412_151233.json
+```
+
+`just bench-summary` prints a comparison table across all tags.
+
+## Notebooks
+
+`notebooks/` contains the student control plane — focused, step-by-step workflows:
+
+| Notebook | Purpose | Prereqs |
+|---|---|---|
+| `01_reserve_node.ipynb` | Reserve Chameleon MI100, write inventory | `.env` with Chameleon credentials |
+| `02_lerobot.ipynb` | Collect episodes → train ACT policy → fetch checkpoint | `01` complete |
+| `03_talkbot.ipynb` | Install talkbot on Pi, configure voice coaching prompt | Pi reachable via SSH |
+| `04_lerobot_talkbot.ipynb` | Combined voice-coached demonstration session | `02` + `03` complete |
+
+**Agents must NOT author or modify notebooks.**
+
+Agents MAY execute notebooks to verify student workflows:
+```bash
+just verify-all          # run all four notebooks via papermill
+just verify-lerobot      # run 02_lerobot only
+```
+
+Each `just verify-*` recipe runs the notebook via **Papermill** and saves the executed output notebook to `bench/results/` — the output notebook is the benchmark artifact (timestamped, cell outputs preserved). Verification failures indicate infrastructure or configuration issues to fix at the operator layer.
+
+### Notebook Conventions
+
+- First cell: `load_dotenv(dotenv_path=Path('..') / '.env')` — all config from `.env`
+- Second cell: bench timing scaffold (`_bench`, `_t0 = time.monotonic()`)
+- Last cell: write `bench/results/<name>_<timestamp>.json`
+- Use `tqdm.notebook` for any multi-step progress within a cell
+- Cells that require live hardware (Pi, arm) use `# TODO:` stubs with the equivalent shell command printed for manual execution
+
+## Operator Interface
+
+`justfile` is the single operator entrypoint. All operator actions go through `just`:
+
+```bash
+just                     # list all recipes
+just check-env           # verify .env is populated
+just verify-all          # smoke-test all student notebooks
+just provision           # run Ansible against current inventory
+just ssh-node            # SSH to training node
+just ssh-pi              # SSH to Pi edge node
+just status              # check Chameleon lease + server
+just bench-latest        # show most recent benchmark result
+```
+
+### Shared State (.env)
+
+All notebooks and justfile recipes share project state via `.env`:
+
+```bash
+cp .env.example .env
+# Fill in values — use `just dump-vault` to read from ansible vault
+just dump-vault          # prints vault.yml contents for copy-paste
+```
+
+The `.env` file is gitignored. `.env.example` is the committed template.
+
 ## Tech Stack
 
 - **Robot**: SO-ARM101, 6-DOF, Feetech STS3215 servos
@@ -40,7 +175,10 @@ The project serves dual purposes: a functional robotics training pipeline and a 
 - **Provisioning**: Ansible (playbooks for node configuration)
 - **Data Transfer**: HuggingFace Hub (datasets and checkpoints)
 - **Edge Container**: Docker on Raspberry Pi 5 (CPU-only PyTorch)
+- **Voice Interface**: ricklon/talkbot (STT + LLM + TTS, local-first, runs on Pi)
 - **Notebook**: Jupyter on Chameleon JupyterHub
+- **Notebook Verification**: Papermill (parameterized execution, output as benchmark artifact)
+- **Config/Shared State**: python-dotenv (`.env` loaded by notebooks and justfile)
 - **Python**: 3.12 (LeRobot v0.5.0 requirement)
 
 ## Project Structure
@@ -48,12 +186,20 @@ The project serves dual purposes: a functional robotics training pipeline and a 
 ```
 coachable-robots/
 ├── CLAUDE.md
+├── AGENTS.md                         # Symlink → CLAUDE.md (for other agent frameworks)
 ├── README.md
-├── CoachableRobots_v3.ipynb          # Main orchestration notebook
+├── justfile                          # Operator interface: verify-*, provision, ssh-node
+├── .env.example                      # Shared project state template (copy to .env)
+├── CoachableRobots_v3.ipynb          # Comprehensive operator reference notebook (all features)
+├── notebooks/                        # Student learning path (operator verifies via papermill)
+│   ├── 01_reserve_node.ipynb         # Reserve Chameleon MI100, write inventory
+│   ├── 02_lerobot.ipynb              # LeRobot-only: collect → train → deploy
+│   ├── 03_talkbot.ipynb              # Talkbot-only: voice coaching interface
+│   └── 04_lerobot_talkbot.ipynb      # Combined: voice-coached demonstration session
 ├── ansible/
 │   ├── ansible.cfg                   # SSH/timeout settings for bare metal
 │   ├── inventory.yml.j2              # Inventory template
-│   ├── inventory.ini                 # Auto-generated by notebook
+│   ├── inventory.ini                 # Auto-generated by 01_reserve_node / justfile
 │   ├── README.md
 │   └── playbooks/
 │       └── setup_training_node.yml   # ROCm + LeRobot install playbook
@@ -62,9 +208,13 @@ coachable-robots/
 │   └── scripts/
 │       ├── collect_demos.sh          # Teleoperate → record → push dataset
 │       └── fetch_checkpoint.sh       # Pull trained policy from HF Hub
+├── scripts/
+│   ├── vault_to_env.py               # Decrypt vault → write .env + SSH keys
+│   ├── reserve.py                    # Non-interactive Chameleon lease + server
+│   └── check_auth.py                 # Live credential validation (Chameleon + HF)
 ├── bench/
-│   ├── benchmark_inference.py        # Latency measurement across tiers
-│   └── results/                      # JSON benchmark outputs per device
+│   ├── benchmark_inference.py        # Multi-target latency benchmark (runs locally or via SSH)
+│   └── results/                      # JSON benchmark outputs (per device + per notebook run)
 └── docs/
     ├── pi5-chi-edge-setup.md         # Pi 5 enrollment on CHI@Edge
     ├── platform-support.md           # Platform x input x simulation matrix
@@ -76,6 +226,7 @@ coachable-robots/
 | Repo | Role | Relationship |
 |------|------|-------------|
 | `ricklon/xbox_soarm_teleop` | Xbox controller teleoperation + IK | Installed in Pi Docker container; provides data collection |
+| `ricklon/talkbot` | Local-first voice assistant (STT + LLM + TTS) | Runs on Pi alongside LeRobot; voice coaching interface |
 | `huggingface/lerobot` | Training framework, dataset format, recording | Core dependency on both edge and cloud |
 | `AMDResearch/Ryzers` | Docker framework for ROCm + LeRobot | Reference; we use Ansible instead |
 
@@ -220,23 +371,34 @@ Benchmark results are JSON files in `bench/results/` with device name, PyTorch v
 ## Development Commands
 
 ```bash
-# === Chameleon Jupyter ===
-# Run Ansible playbook against the training node
-cd /work/coachable-robots/ansible
-ansible-playbook -i inventory.ini playbooks/setup_training_node.yml
+# === Operator (justfile) ===
+just                          # list all recipes
+just check-env                # verify .env is populated
+just dump-vault               # view ansible vault secrets for .env copy-paste
+just verify-all               # smoke-test all student notebooks via papermill
+just provision                # run Ansible against current inventory
+just ssh-node                 # SSH to training node
+just ssh-pi                   # SSH to Pi edge node
+just tunnel                   # SSH tunnel → JupyterLab on http://localhost:8888
+just status                   # check Chameleon lease + server
+just bench-latest             # show most recent benchmark result
 
-# SSH to the training node
-ssh cc@<floating_ip>
+# === Notebook Verification (what just verify-* runs) ===
+papermill notebooks/01_reserve_node.ipynb bench/results/01_reserve_node_$(date +%Y%m%d_%H%M%S).ipynb
 
 # === On the MI100 Node ===
 conda activate lerobot
-rocm-smi                    # verify GPU
+rocm-smi                      # verify GPU
 python -c "import torch; print(torch.cuda.get_device_name(0))"
 
 # === On the Pi (inside Docker) ===
 docker run -it --privileged -v /dev:/dev -e HF_TOKEN=hf_xxx coachable-robots-pi
 bash scripts/collect_demos.sh my_dataset 50
 bash scripts/fetch_checkpoint.sh USER/my_model
+
+# === Talkbot on Pi ===
+ssh -p 22222 root@<pi-ip>
+tmux new-session -d -s talkbot 'cd ~/talkbot && TALKBOT_AGENT_PROMPT="..." uv run talkbot'
 ```
 
 ## Constraints and Conventions
@@ -250,7 +412,9 @@ This project frames imitation learning as "coaching" — students show the robot
 
 ### Code Conventions
 
-- Jupyter notebooks for orchestration and experimentation
+- `justfile` for operator actions — single entrypoint, all infra operations go through `just`
+- `notebooks/` for student workflows — stubs only, content authored by humans not agents
+- `CoachableRobots_v3.ipynb` is the operator reference — comprehensive, not decomposed
 - Ansible for infrastructure provisioning (not bash scripts over SSH)
 - Python 3.12 (LeRobot v0.5.0 requirement)
 - Markdown for all documentation (not docx unless explicitly requested)
@@ -264,6 +428,8 @@ This project frames imitation learning as "coaching" — students show the robot
 - Cleanup cells require explicit confirmation (`input('yes')`)
 - Never hardcode HF tokens or SSH keys in committed files
 - Lease duration defaults should be conservative (6h, not 24h)
+- `.env` is gitignored — secrets live there, not in committed files
+- `.env.example` is the committed template — all keys present, no real values
 
 ## Reference Resources
 

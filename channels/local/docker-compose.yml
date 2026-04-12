@@ -1,0 +1,42 @@
+# channels/local/docker-compose.yml — Local / standalone Docker channel
+#
+# Runs the app image directly on a Pi 5 or Linux laptop with full device access.
+# No cloud account or Chameleon lease required.
+#
+# Usage:
+#   export HF_TOKEN=hf_xxx HF_USER=yourname
+#   docker compose -f channels/local/docker-compose.yml up
+#
+# Or pull and run directly:
+#   docker run -it --privileged -v /dev:/dev -p 7860:7860 \
+#     -v $(pwd)/config/fleet.yaml:/app/config/fleet.yaml \
+#     -e HF_TOKEN=hf_xxx -e HF_USER=yourname \
+#     rianders/lerobot-soarm101:app
+
+version: "3.8"
+
+services:
+  robot:
+    image: rianders/lerobot-soarm101:app
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - ../../config/fleet.yaml:/app/config/fleet.yaml
+      - robot-data:/app/data
+      - robot-checkpoints:/app/checkpoints
+      - robot-calibration:/app/calibration
+    environment:
+      - HF_TOKEN
+      - HF_USER
+      - LEADER_PORT=/dev/ttyACM0
+      - FOLLOWER_PORT=/dev/ttyACM1
+      - CAMERA_INDEX=0
+    ports:
+      - "7860:7860"
+    stdin_open: true
+    tty: true
+
+volumes:
+  robot-data:
+  robot-checkpoints:
+  robot-calibration:
