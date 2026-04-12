@@ -15,6 +15,13 @@ dependencies = [
     "python-chi>=1.0",
     "python-blazarclient>=4.5",
     "python-zunclient @ git+https://github.com/ChameleonCloud/python-zunclient.git",
+    # Notebook verification and shared state
+    "papermill>=2.6",
+    "python-dotenv>=1.0",
+    "tqdm>=4.66",
+    "jupyterlab>=4.0",
+    "ipykernel>=6.0",
+    "ipywidgets>=8.0",
 ]
 
 [project.scripts]
