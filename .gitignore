@@ -192,7 +192,7 @@ cython_debug/
 ansible/.vault_pass
 ansible/*-openrc.sh
 ansible/group_vars/all/vars.yml
-# vault.yml is safe to commit once encrypted with ansible-vault
+ansible/group_vars/all/vault.yml
 
 # Fleet config — contains real station assignments and coach names
 config/fleet.yaml
