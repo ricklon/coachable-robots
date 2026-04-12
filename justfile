@@ -126,6 +126,57 @@ test-all: check-auth test-node test-pi
 ready: test-all verify-all
     @echo "=== System ready for student sessions ==="
 
+# ── Arm Operations ────────────────────────────────────────────────────────────
+
+# Verify Pi serial ports and cameras are present (non-interactive)
+test-arm: check-env
+    @echo "=== Serial Ports ==="
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+        root@${PI_HOST} "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
+    @echo "=== Cameras ==="
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
+    @echo "=== Calibration ==="
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"
+
+# Replay a reference animation on the follower arm: just replay-ref repo=USER/soarm101-touch-block-reference episode=0
+replay-ref repo episode="0": check-env
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "balena run -it --privileged \
+         --device=/dev/ttyACM1 \
+         -v /mnt/data/calibration:/app/calibration \
+         -v /mnt/data/datasets:/app/data \
+         ${HF_USER}/lerobot-soarm101:latest \
+         lerobot-replay \
+           --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
+           --robot.id=alpha_follower \
+           --robot.calibration_dir=/app/calibration \
+           --dataset.repo_id={{repo}} \
+           --dataset.episode={{episode}} \
+           --play_sounds=false"
+
+# Verify arm setup notebook (00_arm_setup)
+verify-arm: check-env
+    papermill \
+        notebooks/00_arm_setup.ipynb \
+        bench/results/00_arm_setup_{{_ts}}.ipynb \
+        --log-output
+
+# Verify touch coaching notebook (05_touch_objects)
+verify-touch: check-env
+    papermill \
+        notebooks/05_touch_objects.ipynb \
+        bench/results/05_touch_objects_{{_ts}}.ipynb \
+        --log-output
+
+# Verify pick-and-place coaching notebook (06_pick_place)
+verify-pick: check-env
+    papermill \
+        notebooks/06_pick_place.ipynb \
+        bench/results/06_pick_place_{{_ts}}.ipynb \
+        --log-output
+
 # ── Benchmarks ────────────────────────────────────────────────────────────────
 #
 # benchmark_inference.py runs on the target machine and outputs JSON.
@@ -221,7 +272,7 @@ verify-combined: check-env
         --log-output
 
 # Run all verification notebooks in sequence
-verify-all: verify-reserve verify-lerobot verify-talkbot verify-combined
+verify-all: verify-arm verify-reserve verify-lerobot verify-talkbot verify-combined verify-touch verify-pick
 
 # ── Access ────────────────────────────────────────────────────────────────────
 
