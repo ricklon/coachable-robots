@@ -42,14 +42,15 @@ dump-vault:
 # Validate .env exists and has no placeholder values
 check-env:
     @test -f .env || (echo "ERROR: .env not found — run 'just vault-to-env' first" && exit 1)
-    @python -c "\
-import os; from dotenv import load_dotenv; load_dotenv(); \
-bad = [k for k,v in os.environ.items() if 'REPLACE_ME' in str(v) or 'your_hf_username' in str(v)]; \
-print('Placeholders found: ' + ', '.join(bad)) if bad else print('ENV: no placeholders')"
+    @python scripts/check_env.py
 
 # Test live credentials against Chameleon API and HuggingFace (exits 1 on failure)
 check-auth: check-env
     uv run python scripts/check_auth.py
+
+# Test only Chameleon credentials required for lease/server operations
+check-chameleon:
+    uv run python scripts/check_auth.py --only chameleon
 
 # Same as check-auth but output as JSON (for agent parsing)
 check-auth-json: check-env
@@ -58,12 +59,36 @@ check-auth-json: check-env
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
 # Reserve Chameleon MI100 node, wait for SSH, write inventory.ini (non-interactive)
-reserve: check-auth
+reserve: check-chameleon
     uv run python scripts/reserve.py
+
+# Reserve CHI@Edge SO-ARM101 device, launch LeRobot container, assign floating IP
+reserve-edge:
+    uv run python scripts/reserve_edge.py
+
+# Reserve only the CHI@Edge SO-ARM101 device lease
+reserve-edge-lease:
+    uv run python scripts/reserve_edge.py --lease-only
+
+# Delete and recreate the arm-01 container (keeps lease; picks up .env changes)
+restart-arm:
+    uv run python scripts/reserve_edge.py --restart-container --no-fip
+
+# Show current CHI@Edge SO-ARM101 lease/container state as JSON
+edge-status:
+    uv run python scripts/reserve_edge.py --status
+
+# Show CHI@Edge device enrollment and health details
+edge-device-show:
+    bash -lc 'source "${EDGE_RC_FILE:-ansible/app-cred-chi-edge-openrc.sh}" && unset OS_PROJECT_ID OS_PROJECT_NAME OS_PROJECT_DOMAIN_ID OS_PROJECT_DOMAIN_NAME && uv run chi-edge device show "${EDGE_DEVICE_NAME:-soarm101-1}"'
 
 # Show current lease + server state as JSON (exits 2 if not SSH-ready)
 node-status:
     uv run python scripts/reserve.py --status
+
+# Release CHI@Edge SO-ARM101 container and lease (requires COACHABLE_CONFIRM_RELEASE=yes)
+release-edge:
+    uv run python scripts/reserve_edge.py --release
 
 # Release lease and server (requires COACHABLE_CONFIRM_RELEASE=yes)
 release:
@@ -82,6 +107,22 @@ provision-control: check-env
         -u cc \
         --private-key ~/.ssh/id_rsa \
         ansible/playbooks/setup_control_node.yml
+
+# Join this machine to the tailnet (runs locally)
+provision-tailscale-local:
+    ansible-playbook \
+        -i "localhost," -c local \
+        ansible/playbooks/setup_tailscale.yml \
+        -e "ts_authkey=${TS_AUTHKEY}" \
+        -e "ts_hostname=coachable-robots-control"
+
+# Join the MI100 training node to the tailnet
+provision-tailscale-node: check-env
+    ansible-playbook \
+        -i ansible/inventory.ini --limit mi100 \
+        ansible/playbooks/setup_tailscale.yml \
+        -e "ts_authkey=${TS_AUTHKEY}" \
+        -e "ts_hostname=coachable-robots-mi100"
 
 # ── System Health ─────────────────────────────────────────────────────────────
 
@@ -126,19 +167,78 @@ test-all: check-auth test-node test-pi
 ready: test-all verify-all
     @echo "=== System ready for student sessions ==="
 
-# ── Arm Operations ────────────────────────────────────────────────────────────
+# ── Arm Operations (fleet: arm-01, arm-02, ...) ───────────────────────────────
+#
+# PI_HOST / PI_PORT in .env control which arm node is targeted.
+# Default: PI_HOST=arm-01, PI_PORT=22  (Tailscale — no floating IP needed)
+# Override per-call: just arm-ssh PI_HOST=arm-02
 
-# Verify Pi serial ports and cameras are present (non-interactive)
-test-arm: check-env
-    @echo "=== Serial Ports ==="
+# SSH into the arm node (via Tailscale by default)
+arm-ssh: check-env
+    ssh root@${PI_HOST}
+
+# Run a command on the arm node: just arm-exec cmd="ls /dev/ttyACM*"
+arm-exec cmd: check-env
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} "{{cmd}}"
+
+# Verify arm node: SSH + serial ports + cameras + tailscale
+arm-test: check-env
+    @echo "=== SSH ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-        root@${PI_HOST} "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
+        root@${PI_HOST} "echo ok && uname -m && hostname"
+    @echo "=== Tailscale ==="
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "tailscale status 2>/dev/null || echo 'tailscale not running'"
+    @echo "=== Serial Ports ==="
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
     @echo "=== Cameras ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
         "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
     @echo "=== Calibration ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
         "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"
+
+# Collect demonstration episodes on the arm node: just arm-collect dataset=touch-block episodes=20
+arm-collect dataset episodes="20": check-env
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "lerobot-record \
+           --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
+           --teleop.type=so101_leader  --teleop.port=/dev/ttyACM0 \
+           --dataset.repo_id=${HF_USER}/{{dataset}} \
+           --dataset.num_episodes={{episodes}} \
+           --dataset.push_to_hub=true"
+
+# Calibrate the arm: just arm-calibrate
+arm-calibrate: check-env
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "lerobot-calibrate \
+           --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
+           --robot.id=alpha_follower \
+           --robot.calibration_dir=/mnt/data/calibration"
+
+# Replay a reference episode on the follower arm: just arm-replay repo=USER/soarm101-touch-block episode=0
+arm-replay repo episode="0": check-env
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+        "lerobot-replay \
+           --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
+           --robot.id=alpha_follower \
+           --robot.calibration_dir=/mnt/data/calibration \
+           --dataset.repo_id={{repo}} \
+           --dataset.episode={{episode}} \
+           --play_sounds=false"
+
+# Open SSH tunnel to arm-01 Gradio UI -> http://localhost:7860
+tunnel-arm: check-env
+    @echo "Tunneling arm Gradio UI -> http://localhost:7860"
+    ssh -L 7860:localhost:7860 -p ${PI_PORT} root@${PI_HOST}
+
+# ── Legacy aliases (old pi-* / balena-based recipes) ──────────────────────────
+# These target the same PI_HOST/PI_PORT but use the old balena runtime.
+# Use arm-* recipes above for CHI@Edge / Tailscale deployments.
+
+# Verify Pi serial ports and cameras are present (non-interactive)
+test-arm: arm-test
 
 # Replay a reference animation on the follower arm: just replay-ref repo=USER/soarm101-touch-block-reference episode=0
 replay-ref repo episode="0": check-env
@@ -218,17 +318,7 @@ bench-all: bench-inference-node bench-inference-pi bench-inference-local
 
 # Print a comparison table of the most recent result per tag
 bench-summary:
-    @python -c "\
-import json, glob, os; \
-files = sorted(glob.glob('bench/results/bench_inference_*.json'), key=os.path.getmtime); \
-seen = {}; \
-[seen.update({json.load(open(f)).get('tag','?'): f}) for f in files]; \
-print(f\"{'tag':<12} {'device':<30} {'p50_matmul_512':>16} {'p50_224':>12}\"); \
-print('-' * 72); \
-[print(f\"{d.get('tag','?'):<12} {d.get('device',{}).get('device_name','?')[:30]:<30} \
-{next((b.get('p50_ms','?') for b in d.get('benchmarks',[]) if b.get('name')=='matmul_512'),'?'):>16} \
-{next((b.get('p50_ms','?') for b in d.get('benchmarks',[]) if b.get('name')=='policy_input_224'),'?'):>12}\") \
-for d in [json.load(open(f)) for f in seen.values()]]" 2>/dev/null || echo "No benchmark results yet"
+    @python scripts/bench_summary.py
 
 # List all benchmark result files
 bench-list:
@@ -280,7 +370,7 @@ verify-all: verify-arm verify-reserve verify-lerobot verify-talkbot verify-combi
 ssh-node: check-env
     ssh cc@${CONTROL_FLOATING_IP}
 
-# SSH to the Pi edge node
+# SSH to the arm edge node (alias for arm-ssh)
 ssh-pi: check-env
     ssh -p ${PI_PORT} root@${PI_HOST}
 

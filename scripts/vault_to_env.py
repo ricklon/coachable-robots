@@ -30,10 +30,11 @@ ENV_OUT     = REPO_ROOT / ".env"
 
 # Maps vault variable names → .env key names
 VAULT_MAP = {
-    "vault_hf_token":            "HF_TOKEN",
-    "vault_chi_credential_id":   "CHI_CREDENTIAL_ID",
+    "vault_hf_token":              "HF_TOKEN",
+    "vault_chi_credential_id":     "CHI_CREDENTIAL_ID",
     "vault_chi_credential_secret": "CHI_CREDENTIAL_SECRET",
-    "vault_control_floating_ip": "CONTROL_FLOATING_IP",
+    "vault_control_floating_ip":   "CONTROL_FLOATING_IP",
+    "vault_ts_authkey":            "TS_AUTHKEY",
 }
 
 # SSH key material goes to files, not .env
@@ -127,6 +128,14 @@ def build_env(vault: dict, dry_run: bool = False) -> None:
             if val and val != "REPLACE_ME":
                 merged[env_key] = val
                 vault_applied.append(env_key)
+
+    # python-chi/OpenStack reads OS_APPLICATION_CREDENTIAL_* directly.
+    if merged.get("CHI_CREDENTIAL_ID") and merged.get("CHI_CREDENTIAL_ID") != "REPLACE_ME":
+        merged["OS_APPLICATION_CREDENTIAL_ID"] = merged["CHI_CREDENTIAL_ID"]
+    if merged.get("CHI_CREDENTIAL_SECRET") and merged.get("CHI_CREDENTIAL_SECRET") != "REPLACE_ME":
+        merged["OS_APPLICATION_CREDENTIAL_SECRET"] = merged["CHI_CREDENTIAL_SECRET"]
+    merged.setdefault("OS_AUTH_TYPE", "v3applicationcredential")
+    merged.setdefault("OS_PROJECT_DOMAIN_NAME", "chameleon")
 
     if dry_run:
         print("DRY RUN — would write to .env:")

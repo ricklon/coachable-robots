@@ -377,3 +377,47 @@
           - "SSH tunnel from your laptop:"
           - "  ssh -L 8888:localhost:{{ jupyter_port }} cc@<kvm-floating-ip>"
           - "Then open: http://localhost:8888"
+
+    # ── Tailscale ──
+    - name: Add Tailscale GPG key
+      shell: |
+        curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+          | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+      args:
+        creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
+
+    - name: Add Tailscale apt repository
+      shell: |
+        curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+          | tee /etc/apt/sources.list.d/tailscale.list
+      args:
+        creates: /etc/apt/sources.list.d/tailscale.list
+
+    - name: Install tailscale
+      apt:
+        name: tailscale
+        state: present
+        update_cache: true
+
+    - name: Enable and start tailscaled
+      systemd:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Check if already authenticated
+      command: tailscale status --json
+      register: ts_status
+      changed_when: false
+      failed_when: false
+
+    - name: Authenticate with tailnet
+      command: >
+        tailscale up
+          --authkey={{ ts_authkey }}
+          --hostname=coachable-robots-control
+          --accept-routes
+      when: >
+        ts_status.rc != 0 or ts_status.stdout == "" or
+        (ts_status.stdout | from_json).get('BackendState', '') != 'Running'
+      no_log: true

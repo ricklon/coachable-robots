@@ -19,6 +19,13 @@ vault_chi_credential_secret: "REPLACE_ME"
 # KVM@TACC control node — set after first provision
 vault_control_floating_ip: "REPLACE_ME"
 
+# Tailscale — single reusable+ephemeral auth key for all nodes.
+# Generate at https://login.tailscale.com/admin/settings/keys
+#   Reusable: yes  (one key enrolls control, MI100, containers)
+#   Ephemeral: yes (nodes auto-expire when offline — no stale entries)
+# Control node is enrolled interactively (persistent); all others use this key.
+vault_ts_authkey: "tskey-auth-REPLACE_ME"
+
 # Pi edge node SSH access
 vault_pi_ssh_private_key: |
   -----BEGIN OPENSSH PRIVATE KEY-----

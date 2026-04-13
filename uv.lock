@@ -673,6 +673,7 @@ dependencies = [
     { name = "papermill" },
     { name = "python-blazarclient" },
     { name = "python-chi" },
+    { name = "python-chi-edge" },
     { name = "python-dotenv" },
     { name = "python-zunclient" },
     { name = "pyyaml" },
@@ -690,6 +691,7 @@ requires-dist = [
     { name = "papermill", specifier = ">=2.6" },
     { name = "python-blazarclient", specifier = ">=4.5" },
     { name = "python-chi", specifier = ">=1.0" },
+    { name = "python-chi-edge", specifier = ">=0.3.1" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-zunclient", git = "https://github.com/ChameleonCloud/python-zunclient.git" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -3164,6 +3166,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/69/b53a16f4c5a83ee86c246f0dd65faaf96df6cf342d1a83a6ecc63a077934/python_chi-1.2.7.tar.gz", hash = "sha256:49febce21fed06901791c5c718f8a8bbbe70d9145aa609bdf47acacf46fa81d9", size = 77474, upload-time = "2026-02-19T22:47:30.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/7a/11c025abc075b665f7f1e39ed8c202f3f1359c6446751b2998ce01850eef/python_chi-1.2.7-py3-none-any.whl", hash = "sha256:12d1aa0790eb292d017b06bd37e6c4b23e5f99232714b030e2222fc8e7bd0187", size = 67607, upload-time = "2026-02-19T22:47:29.13Z" },
+]
+
+[[package]]
+name = "python-chi-edge"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "openstacksdk" },
+    { name = "pyyaml" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/33/badb8107d4e5981e2caec70c9b6df57022a9d4293f6538c38411777de1b3/python_chi_edge-0.3.1.tar.gz", hash = "sha256:ae24175873005ef0fb559a3e2d972d5807cf76cba485b5a263fe7ecefd71758c", size = 112680, upload-time = "2026-04-08T21:38:03.098Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/db/f7cd601af4662330790478cd8530d8d63d999ad6e026cb1ed420a4c625ec/python_chi_edge-0.3.1-py3-none-any.whl", hash = "sha256:1a83e9b22875f964505181aa6cea81ac59ddba5718ca1a146233c16256859c43", size = 127197, upload-time = "2026-04-08T21:38:04.194Z" },
 ]
 
 [[package]]

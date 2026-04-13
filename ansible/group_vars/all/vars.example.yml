@@ -17,6 +17,12 @@ chi_credential_secret: "{{ vault_chi_credential_secret }}"
 # Control node (KVM@TACC) — set after provisioning
 control_floating_ip: "{{ vault_control_floating_ip }}"   # set in vault.yml after first provision
 
+# Tailscale — reusable+ephemeral key; hostnames set per-node at provision time
+# Control node: enrolled interactively as coachable-robots-control (persistent)
+# MI100:        just provision-tailscale-node  → coachable-robots-mi100 (ephemeral)
+# soarm101:     TS_AUTHKEY env var in container → soarm101 (ephemeral)
+ts_authkey: "{{ vault_ts_authkey }}"
+
 # Pi edge node — for SSH config on the control node
 pi_host: "192.168.4.191"
 pi_port: 22222

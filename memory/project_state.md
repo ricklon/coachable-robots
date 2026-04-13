@@ -20,6 +20,13 @@ Pi enrolled on CHI@Edge, arms calibrated and verified, full collect→replay→p
 ## CHI@Edge — dual serial resolved
 - Helpdesk confirmed (2026-04-07): pass `["ttyacm0","ttyacm1"]` in `device_profiles` to expose both ports. No custom profile needed. Notebook and docs updated.
 
+## CHI@Edge — SO-ARM lease path
+- CHI@Edge SO-ARM leases are separate from CHI@TACC MI100 leases. Use `just reserve-edge-lease`, `just reserve-edge`, `just edge-status`, and `just edge-device-show`; do not use `just reserve` for SO-ARM.
+- `just edge-device-show` works with `ansible/app-cred-chi-edge-openrc.sh` and confirms `soarm101-1` exists as a CHI@Edge device.
+- The operator path now generates fresh lease names by default (`EDGE_UNIQUE_LEASE_NAMES=yes`), e.g. `lerobot-soarm101-lease-YYYYMMDD-HHMMSS`, because CHI@Edge should use new lease names rather than reusing old terminated names.
+- Current blocker (2026-04-13): API lease creation for `soarm101-1` still returns CHI@Edge Blazar `ERROR: Internal Server Error`, even with a fresh lease name and explicit start/end timestamps.
+- Next step: create the CHI@Edge lease manually in the web UI. If manual lease succeeds, set `EDGE_LEASE_NAME` to that lease name and use `just edge-status` / `just reserve-edge` to continue container setup.
+
 ## In progress — KVM@TACC control node
 Provisioning notebook and Ansible playbook built (ControlNode_Setup.ipynb + ansible/playbooks/setup_control_node.yml). Next steps to run it:
 1. Download KVM@TACC RC file from kvm.tacc.chameleoncloud.org → save as ansible/app-cred-kvm-tacc-openrc.sh

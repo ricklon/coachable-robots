@@ -30,5 +30,19 @@ ssh-keygen -A
 /usr/sbin/sshd
 echo "[entrypoint] sshd started — SSH available on port 22"
 
+# ── Tailscale ──
+if [ -n "${TS_AUTHKEY:-}" ]; then
+    mkdir -p /var/run/tailscale /var/lib/tailscale
+    tailscaled --state=/var/lib/tailscale/tailscaled.state \
+               --socket=/var/run/tailscale/tailscaled.sock \
+               --tun=userspace-networking &
+    sleep 2
+    tailscale --socket=/var/run/tailscale/tailscaled.sock \
+        up --authkey="${TS_AUTHKEY}" --hostname="${TS_HOSTNAME:-arm-01}" --accept-routes
+    echo "[entrypoint] tailscale up — hostname: ${TS_HOSTNAME:-arm-01}"
+else
+    echo "[entrypoint] TS_AUTHKEY not set — skipping tailscale"
+fi
+
 # ── Fall through to CMD ──
 exec "$@"

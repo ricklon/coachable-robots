@@ -22,6 +22,19 @@ load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=False)
 results: dict[str, dict] = {}
 
 
+def configure_chameleon_env(strip_app_credential_scope: bool = False) -> None:
+    """Mirror repo credential names to the OpenStack names python-chi expects."""
+    if os.getenv("CHI_CREDENTIAL_ID") and not os.getenv("OS_APPLICATION_CREDENTIAL_ID"):
+        os.environ["OS_APPLICATION_CREDENTIAL_ID"] = os.getenv("CHI_CREDENTIAL_ID", "")
+    if os.getenv("CHI_CREDENTIAL_SECRET") and not os.getenv("OS_APPLICATION_CREDENTIAL_SECRET"):
+        os.environ["OS_APPLICATION_CREDENTIAL_SECRET"] = os.getenv("CHI_CREDENTIAL_SECRET", "")
+    os.environ.setdefault("OS_AUTH_TYPE", "v3applicationcredential")
+    os.environ.setdefault("OS_PROJECT_DOMAIN_NAME", "chameleon")
+    if strip_app_credential_scope and os.getenv("OS_AUTH_TYPE") == "v3applicationcredential":
+        for key in ("OS_PROJECT_ID", "OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME"):
+            os.environ.pop(key, None)
+
+
 def check_hf() -> dict:
     token = os.getenv("HF_TOKEN", "")
     user  = os.getenv("HF_USER", "")
@@ -39,6 +52,7 @@ def check_hf() -> dict:
 
 
 def check_chameleon() -> dict:
+    configure_chameleon_env(strip_app_credential_scope=True)
     cred_id     = os.getenv("CHI_CREDENTIAL_ID", "")
     cred_secret = os.getenv("CHI_CREDENTIAL_SECRET", "")
     project     = os.getenv("OS_PROJECT_NAME", "")
@@ -55,8 +69,13 @@ def check_chameleon() -> dict:
         domain   = os.getenv("OS_PROJECT_DOMAIN_NAME", "chameleon")
         _site_map = {"CHI@TACC": "CHI@TACC", "CHI@UC": "CHI@UC", "CHI@Edge": "CHI@Edge"}
         chi.use_site(_site_map.get(region, "CHI@TACC"))
-        chi.set("project_name", project)
-        chi.set("project_domain_name", domain)
+        if os.getenv("OS_AUTH_TYPE") == "v3applicationcredential":
+            chi.set("auth_type", "v3applicationcredential")
+            chi.set("application_credential_id", os.getenv("OS_APPLICATION_CREDENTIAL_ID"))
+            chi.set("application_credential_secret", os.getenv("OS_APPLICATION_CREDENTIAL_SECRET"))
+        else:
+            chi.set("project_name", project)
+            chi.set("project_domain_name", domain)
         # Attempt a lightweight API call — list leases
         from chi import lease
         leases = lease.list_leases()
@@ -66,10 +85,13 @@ def check_chameleon() -> dict:
 
 
 def check_env_completeness() -> dict:
+    configure_chameleon_env()
     required = [
         "HF_USER", "HF_TOKEN",
         "CHI_CREDENTIAL_ID", "CHI_CREDENTIAL_SECRET",
-        "OS_PROJECT_NAME",
+        "OS_AUTH_TYPE", "OS_APPLICATION_CREDENTIAL_ID",
+        "OS_APPLICATION_CREDENTIAL_SECRET", "OS_PROJECT_NAME",
+        "OS_PROJECT_DOMAIN_NAME",
         "LEASE_NAME", "KEY_PAIR_NAME",
         "PI_HOST", "PI_PORT",
     ]
@@ -96,13 +118,26 @@ def check_env_completeness() -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    parser.add_argument(
+        "--only",
+        choices=("all", "chameleon", "huggingface", "env"),
+        default="all",
+        help="Run only one check group",
+    )
     args = parser.parse_args()
 
-    checks = {
-        "env":       check_env_completeness(),
-        "chameleon": check_chameleon(),
-        "huggingface": check_hf(),
-    }
+    if args.only == "all":
+        checks = {
+            "env":       check_env_completeness(),
+            "chameleon": check_chameleon(),
+            "huggingface": check_hf(),
+        }
+    elif args.only == "chameleon":
+        checks = {"chameleon": check_chameleon()}
+    elif args.only == "huggingface":
+        checks = {"huggingface": check_hf()}
+    else:
+        checks = {"env": check_env_completeness()}
 
     all_ok = all(v["ok"] for v in checks.values())
 

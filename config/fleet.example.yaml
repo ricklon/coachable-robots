@@ -1,68 +1,114 @@
-# fleet.example.yaml — Reference fleet configuration
+# fleet.example.yaml — Fleet topology configuration
 #
-# Copy to fleet.yaml and edit for your lab setup.
-# fleet.yaml is gitignored — never commit real station assignments.
+# Defines arms, talkbot co-location, training nodes, and inference associations.
+# Copy to fleet.yaml and customize for your lab.
+#
+#   cp config/fleet.example.yaml config/fleet.yaml
+#
+# fleet.yaml is gitignored — never commit real station assignments or IPs.
 #
 # Usage:
-#   coachable fleet --list
-#   coachable preview --robot alpha
-#   coachable collect --robot alpha --dataset pick_block --episodes 20
+#   coachable fleet --list              # show all nodes and status
+#   just arm-ssh                        # SSH into arm-01 via Tailscale
 
 fleet:
   name: coachable-lab-01
 
-  robots:
-    - name: alpha                    # short slug used in --robot flag
-      type: so101                    # robot type (so101, car, etc.)
-      leader_port: /dev/ttyACM0
-      follower_port: /dev/ttyACM1
-      cameras:                       # named cameras → /dev/video{N}
-        top: 0                       # Logitech C920e — /dev/video0
-        gripper: 2                   # SVPRO OV2710 fisheye — /dev/video2
-                                     # Note: video1 and video3 are UVC metadata nodes, not capture
-      camera_config:
-        top:
-          width: 1280
-          height: 720
-          fps: 30
-          fourcc: YUYV               # C920e: YUYV at 720p gives best color accuracy
-        gripper:
-          width: 1920
-          height: 1080
-          fps: 30
-          fourcc: MJPG               # OV2710: must use MJPG — YUYV is only 6fps at 1080p
-          # Hardware: SVPRO USB Camera Board, OV2710 sensor, 150° FOV fisheye lens
-          # v4l2 setup required before capture:
-          #   v4l2-ctl --device=/dev/video2 \
-          #     --set-ctrl=exposure_dynamic_framerate=0 \
-          #     --set-ctrl=backlight_compensation=2
-      coach: alice                   # name of assigned coach (from coaches list)
-      status: available              # available | in_use | offline
+  # ── Arm nodes ─────────────────────────────────────────────────────────────
+  # CHI@Edge Zun containers running arm-* images.
+  # Tailscale is the only reliable network path (floating IPs unreliable on
+  # user-enrolled Pi 5 devices — k8s pod network not connected to Neutron).
+  arms:
+    - id: arm-01
+      tailscale_host: arm-01          # `ssh root@arm-01` from anywhere on the tailnet
+      chi_device: soarm101-1          # CHI@Edge hardware device name (fixed by platform)
+      image: arm                      # arm | arm-talk | arm-infer | arm-talk-infer
+      talkbot: null                   # co-located | null  (if co-located, same container)
+      talk_host: null                 # Tailscale host of standalone talk-* node (if external)
+      infer_host: null                # Tailscale host of standalone infer-* node (if external)
+      leader_port: /dev/ttyACM0       # SO-ARM101 leader (Feetech STS3215 via USB serial)
+      follower_port: /dev/ttyACM1     # SO-ARM101 follower
+      cameras:
+        top: 0                        # Logitech C920e — /dev/video0
+        gripper: 2                    # SVPRO OV2710 fisheye — /dev/video2
+      coach: null                     # assigned coach name (from coaches list)
+      status: available               # available | in_use | offline
 
-    # Single-camera robot (old format still supported)
-    - name: beta
-      type: so101
-      leader_port: /dev/ttyACM2
-      follower_port: /dev/ttyACM3
-      camera_index: 2                # legacy: equivalent to cameras: {top: 2}
-      coach: null                    # unassigned
-      status: available
+    # Example: arm-02 with Talkbot co-located
+    # - id: arm-02
+    #   tailscale_host: arm-02
+    #   chi_device: soarm101-2
+    #   image: arm-talk
+    #   talkbot: co-located
+    #   talk_host: null
+    #   infer_host: null
+    #   leader_port: /dev/ttyACM0
+    #   follower_port: /dev/ttyACM1
+    #   cameras:
+    #     top: 0
+    #     gripper: 2
+    #   coach: alice
+    #   status: available
 
-# Coaches can be students, instructors, or agents
+  # ── Talkbot nodes ──────────────────────────────────────────────────────────
+  # Standalone Talkbot hosts (when not co-located in the arm container).
+  # Can run on a separate Pi, laptop, or Chameleon VM.
+  # talk_hosts:
+  #   - id: talk-01
+  #     tailscale_host: talk-01
+  #     serves_arm: arm-01            # which arm this talk node coaches
+  #     status: offline
+
+  # ── Training nodes ─────────────────────────────────────────────────────────
+  # Chameleon bare-metal GPU nodes for LeRobot policy training.
+  # Reserve via: just reserve    (MI100 at CHI@TACC)
+  # Provision via: just provision
+  training:
+    - id: train-mi100
+      tailscale_host: train-mi100     # enrolled via: just provision-tailscale-node
+      site: CHI@TACC
+      gpu: mi100                      # AMD Instinct MI100, gfx908, 32GB HBM2
+      gpu_stack: rocm6.3              # ROCm 6.3 + PyTorch 2.7.1+rocm6.3
+      policy_notes:
+        - "ACT: fully supported"
+        - "Diffusion: supported"
+        - "Pi0 3B: tight VRAM — use gradient_checkpointing + bfloat16 + batch_size=8"
+        - "Flash Attention 2: NOT supported (requires gfx90a / MI210+)"
+      status: offline                 # offline until reserved via: just reserve
+
+    # - id: train-h100
+    #   tailscale_host: train-h100
+    #   site: CHI@TACC
+    #   gpu: h100
+    #   gpu_stack: cuda12.x
+    #   status: offline
+
+  # ── Inference nodes ────────────────────────────────────────────────────────
+  # Dedicated hosts for autonomous policy execution (optional — arm-infer image
+  # runs inference co-located on the arm node without a separate infer host).
+  # inference:
+  #   - id: infer-01
+  #     tailscale_host: infer-01
+  #     serves_arm: arm-01
+  #     status: offline
+
+  # ── Control node ───────────────────────────────────────────────────────────
+  control:
+    tailscale_host: coachable-robots-control   # KVM@TACC, persistent
+    jupyter_port: 8888                          # just tunnel -> http://localhost:8888
+
+# ── Coaches ───────────────────────────────────────────────────────────────────
 coaches:
   - name: alice
-    hf_user: rianders                # HuggingFace username for dataset/model repos
-    role: student                    # student | instructor | agent
+    hf_user: rianders                 # HuggingFace username for dataset/model repos
+    role: student                     # student | instructor | agent
 
-  - name: bob
-    hf_user: bobsmith
-    role: student
+  # - name: coach-agent-01
+  #   hf_user: coachable-lab
+  #   role: agent                     # autonomous agent coach — same workflow as a student
 
-  - name: coach-agent-01
-    hf_user: coachable-lab
-    role: agent                      # autonomous coach — same workflow as a student
-
+# ── HuggingFace ───────────────────────────────────────────────────────────────
 hf:
-  org: coachable-lab                 # HF org or username
-  dataset_prefix: soarm101           # dataset repos: {hf_user}/{prefix}-{task}
-  model_prefix: act                  # model repos:   {hf_user}/{prefix}-{task}
+  org: coachable-lab                  # HF org or username prefix
+  dataset_prefix: soarm101            # dataset repos: {hf_user}/{prefix}-{task}
+  model_prefix: act                   # model repos:   {hf_user}/{prefix}-{task}

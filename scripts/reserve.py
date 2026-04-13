@@ -42,14 +42,33 @@ IMAGE_NAME  = "CC-Ubuntu22.04"
 REPO_ROOT   = Path(__file__).parent.parent
 
 
+def configure_chameleon_env(strip_app_credential_scope: bool = False) -> None:
+    """Mirror repo credential names to the OpenStack names python-chi expects."""
+    if os.getenv("CHI_CREDENTIAL_ID") and not os.getenv("OS_APPLICATION_CREDENTIAL_ID"):
+        os.environ["OS_APPLICATION_CREDENTIAL_ID"] = os.getenv("CHI_CREDENTIAL_ID", "")
+    if os.getenv("CHI_CREDENTIAL_SECRET") and not os.getenv("OS_APPLICATION_CREDENTIAL_SECRET"):
+        os.environ["OS_APPLICATION_CREDENTIAL_SECRET"] = os.getenv("CHI_CREDENTIAL_SECRET", "")
+    os.environ.setdefault("OS_AUTH_TYPE", "v3applicationcredential")
+    os.environ.setdefault("OS_PROJECT_DOMAIN_NAME", "chameleon")
+    if strip_app_credential_scope and os.getenv("OS_AUTH_TYPE") == "v3applicationcredential":
+        for key in ("OS_PROJECT_ID", "OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME"):
+            os.environ.pop(key, None)
+
+
 def setup_chi():
     region    = os.getenv("OS_REGION_NAME", "CHI@TACC")
     project   = os.getenv("OS_PROJECT_NAME")
     domain    = os.getenv("OS_PROJECT_DOMAIN_NAME", "chameleon")
+    configure_chameleon_env(strip_app_credential_scope=True)
     _site_map = {"CHI@TACC": "CHI@TACC", "CHI@UC": "CHI@UC", "CHI@Edge": "CHI@Edge"}
     chi.use_site(_site_map.get(region, "CHI@TACC"))
-    chi.set("project_name", project)
-    chi.set("project_domain_name", domain)
+    if os.getenv("OS_AUTH_TYPE") == "v3applicationcredential":
+        chi.set("auth_type", "v3applicationcredential")
+        chi.set("application_credential_id", os.getenv("OS_APPLICATION_CREDENTIAL_ID"))
+        chi.set("application_credential_secret", os.getenv("OS_APPLICATION_CREDENTIAL_SECRET"))
+    else:
+        chi.set("project_name", project)
+        chi.set("project_domain_name", domain)
 
 
 def get_existing_lease():

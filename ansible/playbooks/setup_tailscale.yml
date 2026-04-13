@@ -1,0 +1,97 @@
+---
+# setup_tailscale.yml
+# Installs and authenticates Tailscale on any Debian/Ubuntu host.
+#
+# Variables (set in vault/vars or pass with -e):
+#   ts_authkey   — Tailscale auth key (from vault_ts_authkey)
+#   ts_hostname  — node name on the tailnet (default: inventory_hostname)
+#
+# Usage:
+#   # This node (control):
+#   ansible-playbook -i "localhost," -c local \
+#     ansible/playbooks/setup_tailscale.yml \
+#     -e "ts_hostname=coachable-robots-control"
+#
+#   # MI100 training node (once provisioned):
+#   ansible-playbook -i ansible/inventory.ini --limit mi100 \
+#     ansible/playbooks/setup_tailscale.yml \
+#     -e "ts_hostname=coachable-robots-mi100"
+#
+#   # Via justfile:
+#   just provision-tailscale-control
+#   just provision-tailscale-node
+
+- name: Install and authenticate Tailscale
+  hosts: all
+  become: true
+  vars:
+    ts_hostname: "{{ inventory_hostname }}"
+
+  tasks:
+    - name: Install ca-certificates and curl (prereqs)
+      apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+        update_cache: true
+
+    - name: Add Tailscale GPG key
+      shell: |
+        curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+          | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+      args:
+        creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
+
+    - name: Add Tailscale apt repository
+      shell: |
+        curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+          | tee /etc/apt/sources.list.d/tailscale.list
+      args:
+        creates: /etc/apt/sources.list.d/tailscale.list
+
+    - name: Install tailscale
+      apt:
+        name: tailscale
+        state: present
+        update_cache: true
+
+    - name: Enable and start tailscaled
+      systemd:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Check if already authenticated
+      command: tailscale status --json
+      register: ts_status
+      changed_when: false
+      failed_when: false
+
+    - name: Parse tailscale auth state
+      set_fact:
+        ts_logged_in: "{{ (ts_status.stdout | from_json).get('BackendState', '') == 'Running' }}"
+      when: ts_status.rc == 0 and ts_status.stdout != ""
+
+    - name: Set ts_logged_in false if status failed
+      set_fact:
+        ts_logged_in: false
+      when: ts_status.rc != 0 or ts_status.stdout == ""
+
+    - name: Authenticate with tailnet
+      command: >
+        tailscale up
+          --authkey={{ ts_authkey }}
+          --hostname={{ ts_hostname }}
+          --accept-routes
+      when: not ts_logged_in
+      no_log: true
+
+    - name: Show tailscale status
+      command: tailscale status
+      register: ts_final
+      changed_when: false
+
+    - name: Print tailscale node info
+      debug:
+        msg: "{{ ts_final.stdout_lines }}"
