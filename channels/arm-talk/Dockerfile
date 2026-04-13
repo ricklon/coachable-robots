@@ -31,7 +31,7 @@
 #     -f channels/arm-talk/Dockerfile .
 #   docker push rianders/lerobot-soarm101:arm-talk-$(date +%Y%m%d)
 
-FROM rianders/lerobot-soarm101:arm
+FROM rianders/lerobot-soarm101:chi-edge-20260413
 
 # ── System deps ────────────────────────────────────────────────────────────────
 # cmake + build-essential: compile llama.cpp from source (GLIBC 2.36-compatible)
