@@ -412,6 +412,19 @@ verify-all: verify-arm verify-reserve verify-lerobot verify-talkbot verify-combi
 
 _date := `date +%Y%m%d`
 
+# Build arm base image (app + openssh + Tailscale)
+build-arm:
+    docker buildx build --platform linux/arm64 \
+        -t rianders/lerobot-soarm101:arm \
+        -t rianders/lerobot-soarm101:arm-{{_date}} \
+        -f channels/arm/Dockerfile .
+
+# Build and push arm base image
+push-arm: build-arm
+    docker push rianders/lerobot-soarm101:arm
+    docker push rianders/lerobot-soarm101:arm-{{_date}}
+    @echo "Pushed: rianders/lerobot-soarm101:arm-{{_date}}"
+
 # Build arm-talk image (arm + llama-server + talkbot + Gradio)
 build-arm-talk:
     docker buildx build --platform linux/arm64 \
@@ -425,6 +438,9 @@ push-arm-talk: build-arm-talk
     @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Then run: just restart-arm"
+
+# Build and push the full channel stack: arm base then arm-talk
+push-all-channels: push-arm push-arm-talk
 
 # ── Access ────────────────────────────────────────────────────────────────────
 
