@@ -233,6 +233,45 @@ tunnel-arm: check-env
     @echo "Tunneling arm Gradio UI -> http://localhost:7860"
     ssh -L 7860:localhost:7860 -p ${PI_PORT} root@${PI_HOST}
 
+# ── Talkbot ───────────────────────────────────────────────────────────────────
+#
+# Best CPU-only model (from benchmarks): qwen3.5-0.8b-q8_0 — 90% success, 100%
+# tool selection, ~1.4s latency (m3max bench; Pi5 will be ~5–8x slower).
+#
+# Local server backend (default): llama-cpp-python[server] on port 8000
+#   uv run python -m llama_cpp.server --model models/qwen3.5-0.8b-q8_0.gguf
+#
+# Ollama alternative: ollama serve (port 11434)
+#   Set TALKBOT_LOCAL_SERVER_URL=http://127.0.0.1:11434/v1 in .env
+
+# Start talkbot Gradio UI on this machine (requires local llama-server on :8000)
+talkbot-serve:
+    cd ~/talkbot && uv run talkbot serve \
+        --host 0.0.0.0 \
+        --port 7860
+
+# Start talkbot Gradio UI on arm-01 via SSH and tunnel to localhost:7860
+talkbot-arm: check-env
+    @echo "Starting talkbot on arm-01, tunneling to http://localhost:7860"
+    ssh -L 7860:localhost:7860 root@${PI_HOST} \
+        "cd ~/talkbot && tmux new-session -d -s talkbot 'uv run talkbot serve --no-tts' 2>/dev/null; echo talkbot started"
+
+# Send a single chat message to talkbot (no voice): just talkbot-chat msg="Hello"
+talkbot-chat msg: check-env
+    cd ~/talkbot && uv run talkbot --no-speak chat "{{msg}}"
+
+# Start talkbot on arm-01 in a tmux session with voice coaching prompt
+talkbot-arm-start: check-env
+    ssh root@${PI_HOST} \
+        "cd ~/talkbot && tmux kill-session -t talkbot 2>/dev/null; \
+         tmux new-session -d -s talkbot \
+           'TALKBOT_AGENT_PROMPT=\"${TALKBOT_AGENT_PROMPT}\" uv run talkbot serve'"
+    @echo "TalkBot started on arm-01. Run: just tunnel-arm to access UI."
+
+# Stop talkbot tmux session on arm-01
+talkbot-arm-stop: check-env
+    ssh root@${PI_HOST} "tmux kill-session -t talkbot 2>/dev/null; echo stopped"
+
 # ── Legacy aliases (old pi-* / balena-based recipes) ──────────────────────────
 # These target the same PI_HOST/PI_PORT but use the old balena runtime.
 # Use arm-* recipes above for CHI@Edge / Tailscale deployments.
