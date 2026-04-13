@@ -11,22 +11,30 @@ The project serves dual purposes: a functional robotics training pipeline and a 
 ## Architecture
 
 ```
-┌───────────────────────────┐                          ┌────────────────────────────┐
-│    Raspberry Pi 5 (Edge)  │                          │  Chameleon MI100 (Cloud)   │
-│                           │                          │                            │
-│  xbox_soarm_teleop        │   HuggingFace Hub       │  LeRobot training          │
-│  + SO-ARM101 follower     │  ────── dataset ──────> │  ACT / Diffusion / Pi0     │
-│  + 2x USB cameras         │                          │                            │
-│  + LeRobot recorder       │  <── checkpoint pull ── │  ROCm 6.3 + PyTorch 2.7    │
-│                           │                          │  (gfx908 bare metal)       │
-│  Docker container         │                          │  Ansible-provisioned       │
-└───────────────────────────┘                          └────────────────────────────┘
-        │                                                        │
-        │  Chameleon Jupyter Notebook (Orchestration)             │
-        │  python-chi 1.0+ API                                   │
-        │  Lease/server management, Ansible execution             │
-        └────────────────────────────────────────────────────────┘
+┌──────────────────────────────┐                        ┌────────────────────────────┐
+│  arm-01 (CHI@Edge)           │                        │  Chameleon MI100 (Cloud)   │
+│                              │                        │                            │
+│  SO-ARM101 follower+leader   │   HuggingFace Hub     │  LeRobot training          │
+│  2x USB cameras              │  ── dataset ────────> │  ACT / Diffusion / Pi0     │
+│  LeRobot recorder            │                        │                            │
+│  Talkbot (optional)          │  <── checkpoint ────  │  ROCm 6.3 + PyTorch 2.7    │
+│                              │                        │  (gfx908 bare metal)       │
+│  channels/arm Zun container  │                        │  Ansible-provisioned       │
+└──────────┬───────────────────┘                        └─────────────┬──────────────┘
+           │  Tailscale VPN (userspace)                               │  Tailscale
+           │  ssh root@arm-01                                         │  ssh train-mi100
+           └─────────────────────────┬────────────────────────────────┘
+                                     │
+                          ┌──────────┴──────────┐
+                          │  coachable-robots-   │
+                          │  control (KVM@TACC)  │
+                          │                      │
+                          │  just / Ansible /    │
+                          │  JupyterLab :8888    │
+                          └──────────────────────┘
 ```
+
+**Network topology**: Tailscale is the universal access layer. CHI@Edge floating IPs are unreliable for user-enrolled Pi 5 devices (Neutron port stays DOWN for k8s pods). Tailscale userspace networking in the container bypasses this entirely. All fleet nodes reachable via `ssh root@<hostname>` from any tailnet peer.
 
 ## Role Model
 
@@ -55,20 +63,34 @@ just vault-to-env          # decrypt vault → write .env + SSH keys
 just check-auth            # live credential check (exits 1 on failure)
 just check-auth-json       # same, machine-readable output
 
-# Infrastructure
+# MI100 training node
 just reserve               # non-interactive lease + server + inventory
 just provision             # Ansible: ROCm + LeRobot on training node
 just node-status           # JSON state: lease, server, floating_ip, ssh_ready
+just provision-tailscale-node  # enroll MI100 on tailnet as train-mi100
+
+# arm-01 edge node (CHI@Edge)
+just reserve-edge          # create lease + Zun container (Tailscale auto-enrolls)
+just edge-status           # JSON: lease, container, floating_ip
+just restart-arm           # delete + recreate container (keeps lease; picks up .env changes)
+just arm-test              # SSH + serial ports + cameras + tailscale
+just arm-ssh               # ssh root@arm-01
+just arm-exec cmd="..."    # run a command on the arm
+just arm-collect dataset=pick-block  # lerobot-record via SSH
+just arm-calibrate         # calibrate servos via SSH
+just arm-replay repo=USER/ds        # replay a recorded episode
+just tunnel-arm            # SSH tunnel → Gradio UI on http://localhost:7860
+COACHABLE_CONFIRM_RELEASE=yes just release-edge  # delete container + lease
 
 # Health checks
 just test-node             # GPU + ROCm + PyTorch on MI100
-just test-pi               # serial ports + cameras + containers on Pi
-just test-all              # auth + node + pi combined
+just test-pi               # serial ports + cameras + containers on arm node
+just test-all              # auth + node + arm combined
 just ready                 # test-all + verify-all (full readiness)
 
 # Benchmarks
 just bench-inference-node  # run benchmark_inference.py on MI100, save JSON
-just bench-inference-pi    # run on Pi
+just bench-inference-pi    # run on arm node
 just bench-inference-local # run locally
 just bench-inference-remote host=cc@<ip> tag=h100   # arbitrary remote target
 just bench-all             # all targets + summary table
@@ -83,8 +105,22 @@ COACHABLE_CONFIRM_RELEASE=yes just release
 Before an agent can operate, the machine needs:
 1. `ansible/.vault_pass` — the vault decryption password (injected by human or CI secret)
 2. `~/.ssh/id_rsa` — SSH key for Chameleon nodes (written by `just vault-to-env`)
+3. Tailscale running on the control node — `just provision-tailscale-local` (one-time)
 
-Everything else derives from these two inputs. `just vault-to-env` is the bootstrap step.
+Everything else derives from these inputs. `just vault-to-env` is the bootstrap step.
+Vault contains `vault_ts_authkey` — the reusable+ephemeral key that enrolls all fleet nodes.
+
+### Fleet Node Access (Tailscale)
+
+All fleet nodes are reachable by hostname once on the tailnet:
+
+| Node | Tailscale hostname | SSH |
+|------|-------------------|-----|
+| Arm (CHI@Edge) | `arm-01`, `arm-02`, ... | `ssh root@arm-01` |
+| Training (MI100) | `train-mi100` | `ssh cc@train-mi100` |
+| Control (KVM@TACC) | `coachable-robots-control` | `ssh cc@coachable-robots-control` |
+
+No floating IPs, no port forwarding, no VPN config beyond `ansible/.vault_pass`.
 
 ### Exit Codes
 
@@ -188,30 +224,47 @@ coachable-robots/
 ├── CLAUDE.md
 ├── AGENTS.md                         # Symlink → CLAUDE.md (for other agent frameworks)
 ├── README.md
-├── justfile                          # Operator interface: verify-*, provision, ssh-node
+├── justfile                          # Operator interface: arm-*, reserve-*, provision, verify-*
 ├── .env.example                      # Shared project state template (copy to .env)
+├── config/
+│   └── fleet.example.yaml            # Fleet topology: arms, training, inference, control
 ├── CoachableRobots_v3.ipynb          # Comprehensive operator reference notebook (all features)
 ├── notebooks/                        # Student learning path (operator verifies via papermill)
 │   ├── 01_reserve_node.ipynb         # Reserve Chameleon MI100, write inventory
 │   ├── 02_lerobot.ipynb              # LeRobot-only: collect → train → deploy
 │   ├── 03_talkbot.ipynb              # Talkbot-only: voice coaching interface
 │   └── 04_lerobot_talkbot.ipynb      # Combined: voice-coached demonstration session
+├── channels/                         # Docker image variants by fleet role
+│   ├── app/Dockerfile                # Base layer: LeRobot + coachable + HF CLI (arm64)
+│   ├── arm/Dockerfile                # arm-01, arm-02: app + sshd + Tailscale (CHI@Edge)
+│   ├── arm-talk/Dockerfile           # arm + Talkbot (co-located voice coaching) [scaffold]
+│   ├── arm-infer/Dockerfile          # arm + inference runtime [scaffold]
+│   ├── arm-talk-infer/Dockerfile     # arm + talk + infer (full stack) [scaffold]
+│   ├── balena/                       # Balena OS deployment (Pi 5 bare metal)
+│   ├── dev/                          # Local development container
+│   └── local/                        # docker-compose for local testing
 ├── ansible/
 │   ├── ansible.cfg                   # SSH/timeout settings for bare metal
-│   ├── inventory.yml.j2              # Inventory template
-│   ├── inventory.ini                 # Auto-generated by 01_reserve_node / justfile
-│   ├── README.md
+│   ├── inventory.ini                 # Auto-generated by reserve / justfile
+│   ├── group_vars/all/
+│   │   ├── vars.example.yml          # Non-secret variables (copy to vars.yml)
+│   │   └── vault.example.yml         # Secret variable template (copy to vault.yml, encrypt)
 │   └── playbooks/
-│       └── setup_training_node.yml   # ROCm + LeRobot install playbook
+│       ├── setup_training_node.yml   # ROCm + LeRobot on MI100
+│       ├── setup_control_node.yml    # JupyterLab + tools on KVM@TACC + Tailscale
+│       └── setup_tailscale.yml       # Reusable: enroll any Debian host on tailnet
 ├── docker/
-│   ├── Dockerfile.pi                 # Pi 5 edge collector container
 │   └── scripts/
+│       ├── entrypoint.sh             # Container startup: sshd + tailscaled + CMD
 │       ├── collect_demos.sh          # Teleoperate → record → push dataset
 │       └── fetch_checkpoint.sh       # Pull trained policy from HF Hub
 ├── scripts/
-│   ├── vault_to_env.py               # Decrypt vault → write .env + SSH keys
-│   ├── reserve.py                    # Non-interactive Chameleon lease + server
-│   └── check_auth.py                 # Live credential validation (Chameleon + HF)
+│   ├── vault_to_env.py               # Decrypt vault → write .env + SSH keys (TS_AUTHKEY)
+│   ├── reserve.py                    # Non-interactive Chameleon MI100 lease + server
+│   ├── reserve_edge.py               # CHI@Edge device lease + Zun container + Tailscale
+│   ├── check_auth.py                 # Live credential validation (Chameleon + HF)
+│   ├── check_env.py                  # Validate .env for placeholder values
+│   └── bench_summary.py              # Compare latest benchmark results across tags
 ├── bench/
 │   ├── benchmark_inference.py        # Multi-target latency benchmark (runs locally or via SSH)
 │   └── results/                      # JSON benchmark outputs (per device + per notebook run)
@@ -360,44 +413,74 @@ The benchmarking framework measures inference latency and training throughput ac
 
 Benchmark results are JSON files in `bench/results/` with device name, PyTorch version, input shapes, and timing distributions.
 
-## Docker Conventions (Pi Edge)
+## Docker Conventions (channels/)
 
-- Base image: `python:3.12-slim-bookworm`
+Images are organized by fleet role under `channels/`. All arm variants build from `channels/app/`:
+
+| Channel | Image tag | Contents |
+|---------|-----------|----------|
+| `channels/app/` | `:app` | LeRobot + coachable + HF CLI (arm64 base) |
+| `channels/arm/` | `:arm`, `:arm-YYYYMMDD` | app + sshd + Tailscale (CHI@Edge) |
+| `channels/arm-talk/` | `:arm-talk` | arm + Talkbot (co-located) |
+| `channels/arm-infer/` | `:arm-infer` | arm + inference runtime |
+| `channels/balena/` | `:balena` | app + balena supervisor label |
+
+Key conventions:
+- Base: `arm64v8/python:3.12-slim-bookworm` (arm64 only — runs on Pi 5)
 - PyTorch: CPU-only wheels (`--index-url .../whl/cpu`)
-- Must run with `--privileged -v /dev:/dev` for camera and serial passthrough
-- HF token passed as environment variable, never baked into image
-- Container installs both `lerobot` and `xbox_soarm_teleop`
+- Device access via CHI@Edge `device_profiles`, NOT `--privileged` (Zun limitation)
+- HF token and Tailscale auth key passed as env vars, never baked into image
+- **Use dated tags** to bust CHI@Edge image cache — `image_pull_policy=always` is forbidden (HTTP 403)
+  ```bash
+  docker buildx build --platform linux/arm64 \
+    -t rianders/lerobot-soarm101:arm \
+    -t rianders/lerobot-soarm101:arm-$(date +%Y%m%d) \
+    -f channels/arm/Dockerfile .
+  ```
+- Container entrypoint (`docker/scripts/entrypoint.sh`) starts sshd + tailscaled before CMD
 
 ## Development Commands
 
 ```bash
 # === Operator (justfile) ===
-just                          # list all recipes
-just check-env                # verify .env is populated
-just dump-vault               # view ansible vault secrets for .env copy-paste
-just verify-all               # smoke-test all student notebooks via papermill
-just provision                # run Ansible against current inventory
-just ssh-node                 # SSH to training node
-just ssh-pi                   # SSH to Pi edge node
-just tunnel                   # SSH tunnel → JupyterLab on http://localhost:8888
-just status                   # check Chameleon lease + server
-just bench-latest             # show most recent benchmark result
+just                              # list all recipes
+just check-env                    # verify .env is populated
+just dump-vault                   # view ansible vault secrets for .env copy-paste
+just verify-all                   # smoke-test all student notebooks via papermill
+just provision                    # run Ansible against current inventory
+just ssh-node                     # SSH to training node (via CONTROL_FLOATING_IP)
+just arm-ssh                      # SSH to arm-01 via Tailscale
+just tunnel                       # SSH tunnel → JupyterLab on http://localhost:8888
+just tunnel-arm                   # SSH tunnel → arm Gradio UI on http://localhost:7860
+just edge-status                  # show CHI@Edge lease + container as JSON
+just node-status                  # show MI100 lease + server as JSON
+just bench-latest                 # show most recent benchmark result
+
+# === arm-01 operations (via Tailscale) ===
+ssh root@arm-01                   # direct SSH (PI_HOST=arm-01, PI_PORT=22)
+just arm-test                     # SSH + tailscale + serial + cameras check
+just arm-exec cmd="ls /dev/ttyACM*"
+just arm-collect dataset=pick-block episodes=20
+just arm-calibrate
+just arm-replay repo=rianders/soarm101-pick-block episode=0
+just restart-arm                  # delete + recreate container, pick up .env changes
 
 # === Notebook Verification (what just verify-* runs) ===
 papermill notebooks/01_reserve_node.ipynb bench/results/01_reserve_node_$(date +%Y%m%d_%H%M%S).ipynb
 
 # === On the MI100 Node ===
 conda activate lerobot
-rocm-smi                      # verify GPU
+rocm-smi                          # verify GPU
 python -c "import torch; print(torch.cuda.get_device_name(0))"
 
-# === On the Pi (inside Docker) ===
-docker run -it --privileged -v /dev:/dev -e HF_TOKEN=hf_xxx coachable-robots-pi
-bash scripts/collect_demos.sh my_dataset 50
-bash scripts/fetch_checkpoint.sh USER/my_model
+# === On the arm node (CHI@Edge container via Tailscale) ===
+ssh root@arm-01
+ls /dev/ttyACM*                   # servo controller (requires device_profiles)
+ls /dev/video0 /dev/video2        # cameras
+tailscale status                  # verify tailnet membership
 
-# === Talkbot on Pi ===
-ssh -p 22222 root@<pi-ip>
+# === Talkbot on arm ===
+ssh root@arm-01
 tmux new-session -d -s talkbot 'cd ~/talkbot && TALKBOT_AGENT_PROMPT="..." uv run talkbot'
 ```
 
@@ -498,4 +581,56 @@ docker run -it --privileged -v /dev:/dev coachable-robots-pi
 # Inside container, verify:
 ls /dev/video*      # cameras
 ls /dev/ttyACM*     # servo controller
+```
+
+### CHI@Edge: lease creation fails (Blazar 500 error)
+
+Application credentials only have member+reader roles — Blazar lease creation requires admin.
+`reserve_edge.py` will print the exact portal URL and lease name to use:
+
+```
+CHI@Edge device leases must be created via the portal or Chameleon JupyterHub.
+  1. Open: https://chi.edge.chameleoncloud.org/project/leases/
+  2. Click '+ Create Lease', Resource type: Device, device name: soarm101-1
+  3. Once ACTIVE, set EDGE_LEASE_ID=<lease-id> in .env, then re-run: just reserve-edge
+```
+
+After creating via portal, pin the lease ID in `.env`:
+```bash
+EDGE_LEASE_ID=<uuid-from-portal>   # overrides name-based lookup in reserve_edge.py
+```
+
+### CHI@Edge: SSH not working / floating IP unreachable
+
+Neutron port stays DOWN for k8s pods on user-enrolled Pi 5 devices — this is a platform
+limitation. Use Tailscale instead:
+```bash
+ssh root@arm-01    # works as long as TS_AUTHKEY was set when container was created
+```
+
+If the container was created without `TS_AUTHKEY`:
+```bash
+# Update .env with TS_AUTHKEY, then restart the container:
+just restart-arm   # deletes container, recreates with new env (keeps lease)
+```
+
+### CHI@Edge: arm has no serial ports or cameras (/dev/ttyACM* missing)
+
+smarter-device-manager device passthrough is not configured for user-enrolled Pi 5 devices.
+This is a CHI@Edge platform issue — a helpdesk ticket has been filed.
+Workaround: set `EDGE_DEVICE_PROFILES=` (empty) to launch container without device profiles.
+The container will run (Tailscale + sshd work), but arm control requires device passthrough.
+
+### CHI@Edge: image not updated after rebuild
+
+`image_pull_policy=always` is forbidden (HTTP 403). The Pi node caches images by tag.
+Force a fresh pull by pushing a dated tag:
+```bash
+docker buildx build --platform linux/arm64 \
+  -t rianders/lerobot-soarm101:arm-$(date +%Y%m%d) \
+  -f channels/arm/Dockerfile . --push
+# Then update .env:
+EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-$(date +%Y%m%d)
+# Recreate container:
+just restart-arm
 ```
