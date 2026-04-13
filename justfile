@@ -403,6 +403,29 @@ verify-combined: check-env
 # Run all verification notebooks in sequence
 verify-all: verify-arm verify-reserve verify-lerobot verify-talkbot verify-combined verify-touch verify-pick
 
+# ── Docker Image Builds (channels/) ──────────────────────────────────────────
+#
+# Images are tagged with a date to bust CHI@Edge's k8s image cache.
+# image_pull_policy=always is forbidden (HTTP 403) — dated tags are required.
+#
+# After building, push and update EDGE_IMAGE_REF in .env, then just restart-arm.
+
+_date := `date +%Y%m%d`
+
+# Build arm-talk image (arm + llama-server + talkbot + Gradio)
+build-arm-talk:
+    docker buildx build --platform linux/arm64 \
+        -t rianders/lerobot-soarm101:arm-talk \
+        -t rianders/lerobot-soarm101:arm-talk-{{_date}} \
+        -f channels/arm-talk/Dockerfile .
+
+# Build and push arm-talk image with dated tag
+push-arm-talk: build-arm-talk
+    docker push rianders/lerobot-soarm101:arm-talk-{{_date}}
+    @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
+    @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
+    @echo "Then run: just restart-arm"
+
 # ── Access ────────────────────────────────────────────────────────────────────
 
 # SSH to the training node
