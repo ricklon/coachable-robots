@@ -51,7 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Source build produces a GLIBC-compatible binary (~15 min on CM4).
 # -DGGML_NATIVE=OFF: portable binary (no host-specific CPU flags)
 # -DLLAMA_BUILD_SERVER=ON: include llama-server
-ARG LLAMA_CPP_TAG=b5570
+ARG LLAMA_CPP_TAG=b8781
 RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         https://github.com/ggerganov/llama.cpp /tmp/llama.cpp \
     && cmake -B /tmp/llama.cpp/build /tmp/llama.cpp \
