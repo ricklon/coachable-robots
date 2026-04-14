@@ -14,6 +14,12 @@ with any useful language model:
 CPU pegs at 200%+ during generation. The Pi is appropriate for robot control,
 camera capture, and data collection — not inference.
 
+## Decision: Pi Runs UI Only
+
+**The Pi (arm-01) does not run llama-server.** This is a deliberate architectural decision.
+The arm-talk image should NOT include a llama.cpp build stage — it adds 90 min to
+build time, ~200MB to image size, and produces a binary the Pi will never use in production.
+
 ## The Solution: Off-Device Inference
 
 The `arm-talk` container is designed to point at any OpenAI-compatible inference
