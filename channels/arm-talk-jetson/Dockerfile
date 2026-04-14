@@ -36,8 +36,22 @@
 #     -t rianders/lerobot-soarm101:arm-talk-jetson-$(date +%Y%m%d) \
 #     -f channels/arm-talk-jetson/Dockerfile .
 #
-# Note: Build on the Jetson itself (native arm64 + CUDA headers available).
-# Cross-compiling CUDA from x86 requires the full CUDA cross-toolkit — not worth it.
+# Build strategy (CHI@Edge containers have no outbound internet):
+#   The k8s NODE has internet for image pulls; the container POD does not.
+#   Solution: bake llama.cpp + model into the image at build time.
+#   Build must happen on a machine with ARM64 + CUDA headers:
+#     - The Jetson HOST itself (via CHI@Edge exec-on-device or bare-metal shell)
+#     - Another Jetson dev kit
+#     - NVIDIA Grace Hopper cloud instance
+#   Cross-compiling CUDA from x86 requires the full CUDA cross-toolkit — not worth it.
+#
+# Build with model pre-downloaded (recommended for CHI@Edge):
+#   docker build --build-arg HF_TOKEN=<your-token> \
+#     -t rianders/lerobot-soarm101:arm-talk-jetson-$(date +%Y%m%d) \
+#     -f channels/arm-talk-jetson/Dockerfile . && docker push ...
+#
+# Build without model (if network is fixed or for local dev):
+#   Override start-llama-server.sh to download at runtime (already does this as fallback).
 
 # JetPack 6.x + CUDA 12.6 + Python 3.12
 # dustynv containers: https://github.com/dusty-nv/jetson-containers
@@ -89,6 +103,23 @@ RUN git clone --depth 1 --branch "${TALKBOT_BRANCH}" \
     && pip install uv \
     && uv sync --extra gradio \
     && uv run talkbot --help > /dev/null
+
+# ── Model: pre-download at build time so container needs no internet ─────────
+# The k8s node (Jetson host) has internet for image pulls even if the pod
+# network is egress-filtered. Baking the model in avoids runtime downloads.
+# Override at build time: --build-arg LLAMA_MODEL_REPO=... LLAMA_MODEL_FILE=...
+ARG LLAMA_MODEL_REPO=bartowski/google_gemma-4-26B-A4B-it-GGUF
+ARG LLAMA_MODEL_FILE=google_gemma-4-26B-A4B-it-Q4_K_M.gguf
+ARG LLAMA_MODEL_DIR=/app/models
+ARG HF_TOKEN=""
+RUN mkdir -p "${LLAMA_MODEL_DIR}" \
+    && pip install huggingface_hub[cli] \
+    && huggingface-cli download "${LLAMA_MODEL_REPO}" "${LLAMA_MODEL_FILE}" \
+        --local-dir "${LLAMA_MODEL_DIR}" \
+        ${HF_TOKEN:+--token "${HF_TOKEN}"}
+ENV LLAMA_MODEL_DIR=/app/models \
+    LLAMA_MODEL_REPO=${LLAMA_MODEL_REPO} \
+    LLAMA_MODEL_FILE=${LLAMA_MODEL_FILE}
 
 # ── entrypoint + startup script ───────────────────────────────────────────────
 COPY docker/scripts/entrypoint.sh /app/scripts/entrypoint.sh
