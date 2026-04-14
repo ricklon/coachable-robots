@@ -414,27 +414,24 @@ _date := `date +%Y%m%d`
 
 # Build arm base image (app + openssh + Tailscale)
 build-arm:
-    docker buildx build --platform linux/arm64 \
+    docker buildx build --platform linux/arm64 --push \
         -t rianders/lerobot-soarm101:arm \
         -t rianders/lerobot-soarm101:arm-{{_date}} \
         -f channels/arm/Dockerfile .
 
-# Build and push arm base image
+# Build and push arm base image (alias — build-arm already pushes)
 push-arm: build-arm
-    docker push rianders/lerobot-soarm101:arm
-    docker push rianders/lerobot-soarm101:arm-{{_date}}
     @echo "Pushed: rianders/lerobot-soarm101:arm-{{_date}}"
 
-# Build arm-talk image (arm + llama-server + talkbot + Gradio)
-build-arm-talk:
-    docker buildx build --platform linux/arm64 \
+# Build and push arm-talk image (--push sends directly to registry from buildx cache)
+push-arm-talk:
+    docker buildx build --platform linux/arm64 --push \
         -t rianders/lerobot-soarm101:arm-talk \
         -t rianders/lerobot-soarm101:arm-talk-{{_date}} \
         -f channels/arm-talk/Dockerfile .
-
-# Build and push arm-talk image with dated tag
-push-arm-talk: build-arm-talk
-    docker push rianders/lerobot-soarm101:arm-talk-{{_date}}
+    @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
+    @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
+    @echo "Then run: just restart-arm"
     @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Then run: just restart-arm"
