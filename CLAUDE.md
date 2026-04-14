@@ -621,6 +621,23 @@ This is a CHI@Edge platform issue — a helpdesk ticket has been filed.
 Workaround: set `EDGE_DEVICE_PROFILES=` (empty) to launch container without device profiles.
 The container will run (Tailscale + sshd work), but arm control requires device passthrough.
 
+### CHI@Edge: Jetson AGX Orin — no outbound internet from containers
+
+`jetson-agx-orin-devkit-64gb-1` containers have no outbound internet access.
+DNS (10.43.0.10 CoreDNS) doesn't resolve external names, and TCP connections time out.
+This prevents Tailscale from registering and blocks OpenRouter/HuggingFace API calls.
+
+Root cause: The Jetson device is on a different CHI@Edge network segment (different facility)
+from the soarm101 devices; egress filtering appears more restrictive.
+
+Status: Helpdesk ticket to be filed. Use arm-01 (soarm101-1) for benchmarks in the meantime.
+
+Diagnostics run:
+- `/etc/resolv.conf` shows `nameserver 10.43.0.10` (k8s CoreDNS)
+- `/proc/net/route` shows `169.254.1.1` gateway on eth0 (k8s CNI, normal)
+- `socket.gethostbyname('controlplane.tailscale.com')` times out (DNS failing)
+- Tailscale logs show all DERP bootstrap IPs timing out or IPv6 unreachable
+
 ### CHI@Edge: image not updated after rebuild
 
 `image_pull_policy=always` is forbidden (HTTP 403). The Pi node caches images by tag.
