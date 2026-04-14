@@ -32,3 +32,7 @@ vault_pi_ssh_private_key: |
   REPLACE_ME
   -----END OPENSSH PRIVATE KEY-----
 vault_pi_ssh_host_key: "REPLACE_ME"  # run: ssh-keyscan -p 22222 192.168.4.191
+
+# OpenRouter — cloud inference for talkbot (used when TALKBOT_LLM_BACKEND=openrouter)
+# Generate at https://openrouter.ai/keys
+vault_openrouter_api_key: "sk-or-REPLACE_ME"

@@ -35,6 +35,7 @@ VAULT_MAP = {
     "vault_chi_credential_secret": "CHI_CREDENTIAL_SECRET",
     "vault_control_floating_ip":   "CONTROL_FLOATING_IP",
     "vault_ts_authkey":            "TS_AUTHKEY",
+    "vault_openrouter_api_key":    "OPENROUTER_API_KEY",
 }
 
 # SSH key material goes to files, not .env
