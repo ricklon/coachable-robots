@@ -442,6 +442,19 @@ push-arm-talk: build-arm-talk
 # Build and push the full channel stack: arm base then arm-talk
 push-all-channels: push-arm push-arm-talk
 
+# Build arm-talk-jetson image (Jetson Orin: CUDA-enabled llama-server + talkbot)
+# Must be built ON the Jetson (native arm64 + CUDA headers) — not cross-compiled
+build-arm-talk-jetson:
+    docker build \
+        -t rianders/lerobot-soarm101:arm-talk-jetson \
+        -t rianders/lerobot-soarm101:arm-talk-jetson-{{_date}} \
+        -f channels/arm-talk-jetson/Dockerfile .
+
+# Push arm-talk-jetson image (run this on the Jetson after building)
+push-arm-talk-jetson: build-arm-talk-jetson
+    docker push rianders/lerobot-soarm101:arm-talk-jetson-{{_date}}
+    @echo "Pushed: rianders/lerobot-soarm101:arm-talk-jetson-{{_date}}"
+
 # ── Access ────────────────────────────────────────────────────────────────────
 
 # SSH to the training node
