@@ -299,7 +299,7 @@ def reserve(lease_only: bool = False, no_fip: bool = False, restart_container: b
             env["TS_HOSTNAME"] = ts_hostname
             print(f"  Tailscale enabled — hostname: {ts_hostname}")
         # Talkbot configuration — passed through if set in .env
-        for var in ("TALKBOT_LLM_BACKEND", "TALKBOT_LOCAL_SERVER_URL",
+        for var in ("TALKBOT_LLM_PROVIDER", "TALKBOT_LOCAL_SERVER_URL",
                     "TALKBOT_AGENT_PROMPT", "OPENROUTER_API_KEY",
                     "TALKBOT_PORT", "TALKBOT_HOST"):
             val = os.getenv(var, "")

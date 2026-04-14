@@ -123,7 +123,7 @@ def load_fleet_config() -> dict[str, str]:
     talkbot = fleet.get("talkbot", {})
     result = {}
     if "llm_backend" in talkbot:
-        result["TALKBOT_LLM_BACKEND"] = talkbot["llm_backend"]
+        result["TALKBOT_LLM_PROVIDER"] = talkbot["llm_backend"]
     if "local_server_url" in talkbot:
         result["TALKBOT_LOCAL_SERVER_URL"] = talkbot["local_server_url"]
     if "agent_prompt" in talkbot:
