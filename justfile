@@ -15,6 +15,30 @@
 
 set dotenv-load := true
 
+# ── Dynamic Tailscale hostname resolution ─────────────────────────────────────
+# Finds the currently-online arm-* node on the tailnet at recipe execution time.
+# Falls back to PI_HOST from .env if tailscale is unavailable or no node is online.
+# This means PI_HOST never needs manual updating after a container restart.
+_arm_host := `python3 -c "
+import subprocess, json, os, sys
+try:
+    out = subprocess.check_output(['tailscale','status','--json'], stderr=subprocess.DEVNULL)
+    peers = json.loads(out).get('Peer', {}).values()
+    # HostName is always the advertised name (e.g. 'arm-01'); suffix only in DNSName.
+    # Strip the .tail*.ts.net. suffix to get the short hostname (e.g. 'arm-01-5').
+    online = []
+    for p in peers:
+        if p.get('Online') and p.get('HostName','').startswith('arm-'):
+            dns = p.get('DNSName','').split('.')[0]  # e.g. 'arm-01-5'
+            if dns:
+                online.append(dns)
+    if online:
+        print(sorted(online)[-1]); sys.exit(0)
+except Exception:
+    pass
+print(os.environ.get('PI_HOST','arm-01'))
+" 2>/dev/null || echo "${PI_HOST:-arm-01}"`
+
 _default:
     @just --list
 
@@ -146,17 +170,17 @@ test-node: check-env
 
 # Test Pi edge node: SSH + serial ports + cameras + containers
 test-pi: check-env
-    @echo "=== Pi SSH ==="
+    @echo "=== Pi SSH ({{_arm_host}}) ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-        root@${PI_HOST} "echo ok && uname -m"
+        root@{{_arm_host}} "echo ok && uname -m"
     @echo "=== Serial Ports ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
     @echo "=== Cameras ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
     @echo "=== Containers ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "balena ps 2>/dev/null || docker ps 2>/dev/null || echo 'no container runtime'"
 
 # Full system health check: auth + node + pi
@@ -169,39 +193,43 @@ ready: test-all verify-all
 
 # ── Arm Operations (fleet: arm-01, arm-02, ...) ───────────────────────────────
 #
-# PI_HOST / PI_PORT in .env control which arm node is targeted.
-# Default: PI_HOST=arm-01, PI_PORT=22  (Tailscale — no floating IP needed)
-# Override per-call: just arm-ssh PI_HOST=arm-02
+# _arm_host resolves the online arm-* node from Tailscale at runtime.
+# PI_HOST in .env is the fallback if tailscale is unavailable.
+# No manual .env update needed after container restarts.
+
+# Show which arm node will be targeted by arm-* recipes
+arm-host:
+    @echo "{{_arm_host}}"
 
 # SSH into the arm node (via Tailscale by default)
 arm-ssh: check-env
-    ssh root@${PI_HOST}
+    ssh root@{{_arm_host}}
 
 # Run a command on the arm node: just arm-exec cmd="ls /dev/ttyACM*"
 arm-exec cmd: check-env
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} "{{cmd}}"
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} "{{cmd}}"
 
 # Verify arm node: SSH + serial ports + cameras + tailscale
 arm-test: check-env
-    @echo "=== SSH ==="
+    @echo "=== SSH ({{_arm_host}}) ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-        root@${PI_HOST} "echo ok && uname -m && hostname"
+        root@{{_arm_host}} "echo ok && uname -m && hostname"
     @echo "=== Tailscale ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "tailscale status 2>/dev/null || echo 'tailscale not running'"
     @echo "=== Serial Ports ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
     @echo "=== Cameras ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
     @echo "=== Calibration ==="
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"
 
 # Collect demonstration episodes on the arm node: just arm-collect dataset=touch-block episodes=20
 arm-collect dataset episodes="20": check-env
-    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "lerobot-record \
            --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
            --teleop.type=so101_leader  --teleop.port=/dev/ttyACM0 \
@@ -211,7 +239,7 @@ arm-collect dataset episodes="20": check-env
 
 # Calibrate the arm: just arm-calibrate
 arm-calibrate: check-env
-    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "lerobot-calibrate \
            --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
            --robot.id=alpha_follower \
@@ -219,7 +247,7 @@ arm-calibrate: check-env
 
 # Replay a reference episode on the follower arm: just arm-replay repo=USER/soarm101-touch-block episode=0
 arm-replay repo episode="0": check-env
-    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "lerobot-replay \
            --robot.type=so101_follower --robot.port=/dev/ttyACM1 \
            --robot.id=alpha_follower \
@@ -228,10 +256,10 @@ arm-replay repo episode="0": check-env
            --dataset.episode={{episode}} \
            --play_sounds=false"
 
-# Open SSH tunnel to arm-01 Gradio UI -> http://localhost:7860
+# Open SSH tunnel to arm Gradio UI -> http://localhost:7860
 tunnel-arm: check-env
-    @echo "Tunneling arm Gradio UI -> http://localhost:7860"
-    ssh -L 7860:localhost:7860 -p ${PI_PORT} root@${PI_HOST}
+    @echo "Tunneling arm Gradio UI -> http://localhost:7860 (host: {{_arm_host}})"
+    ssh -L 7860:localhost:7860 -p ${PI_PORT} root@{{_arm_host}}
 
 # ── Talkbot ───────────────────────────────────────────────────────────────────
 #
@@ -250,27 +278,27 @@ talkbot-serve:
         --host 0.0.0.0 \
         --port 7860
 
-# Start talkbot Gradio UI on arm-01 via SSH and tunnel to localhost:7860
+# Start talkbot Gradio UI on arm via SSH and tunnel to localhost:7860
 talkbot-arm: check-env
-    @echo "Starting talkbot on arm-01, tunneling to http://localhost:7860"
-    ssh -L 7860:localhost:7860 root@${PI_HOST} \
+    @echo "Starting talkbot on {{_arm_host}}, tunneling to http://localhost:7860"
+    ssh -L 7860:localhost:7860 root@{{_arm_host}} \
         "cd ~/talkbot && tmux new-session -d -s talkbot 'uv run talkbot serve --no-tts' 2>/dev/null; echo talkbot started"
 
 # Send a single chat message to talkbot (no voice): just talkbot-chat msg="Hello"
 talkbot-chat msg: check-env
     cd ~/talkbot && uv run talkbot --no-speak chat "{{msg}}"
 
-# Start talkbot on arm-01 in a tmux session with voice coaching prompt
+# Start talkbot on arm in a tmux session with voice coaching prompt
 talkbot-arm-start: check-env
-    ssh root@${PI_HOST} \
+    ssh root@{{_arm_host}} \
         "cd ~/talkbot && tmux kill-session -t talkbot 2>/dev/null; \
          tmux new-session -d -s talkbot \
            'TALKBOT_AGENT_PROMPT=\"${TALKBOT_AGENT_PROMPT}\" uv run talkbot serve'"
-    @echo "TalkBot started on arm-01. Run: just tunnel-arm to access UI."
+    @echo "TalkBot started on {{_arm_host}}. Run: just tunnel-arm to access UI."
 
-# Stop talkbot tmux session on arm-01
+# Stop talkbot tmux session on arm
 talkbot-arm-stop: check-env
-    ssh root@${PI_HOST} "tmux kill-session -t talkbot 2>/dev/null; echo stopped"
+    ssh root@{{_arm_host}} "tmux kill-session -t talkbot 2>/dev/null; echo stopped"
 
 # ── Legacy aliases (old pi-* / balena-based recipes) ──────────────────────────
 # These target the same PI_HOST/PI_PORT but use the old balena runtime.
@@ -281,7 +309,7 @@ test-arm: arm-test
 
 # Replay a reference animation on the follower arm: just replay-ref repo=USER/soarm101-touch-block-reference episode=0
 replay-ref repo episode="0": check-env
-    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@${PI_HOST} \
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "balena run -it --privileged \
          --device=/dev/ttyACM1 \
          -v /mnt/data/calibration:/app/calibration \
@@ -334,8 +362,8 @@ bench-inference-node: check-env
 
 # Run inference benchmark on the Pi edge node
 bench-inference-pi: check-env
-    @echo "Running inference benchmark on Pi (${PI_HOST})..."
-    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@${PI_HOST} \
+    @echo "Running inference benchmark on Pi ({{_arm_host}})..."
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "python ~/benchmark_inference.py --tag pi5 --no-save" \
         | tee bench/results/bench_inference_pi5_{{_ts}}.json
 
@@ -457,7 +485,7 @@ ssh-node: check-env
 
 # SSH to the arm edge node (alias for arm-ssh)
 ssh-pi: check-env
-    ssh -p ${PI_PORT} root@${PI_HOST}
+    ssh -p ${PI_PORT} root@{{_arm_host}}
 
 # Open SSH tunnel to JupyterLab on the control node → http://localhost:8888
 tunnel: check-env
