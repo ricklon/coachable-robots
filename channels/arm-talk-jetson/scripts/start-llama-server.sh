@@ -16,9 +16,10 @@
 
 set -e
 
-# Jetson defaults: larger model, full GPU offload
-LLAMA_MODEL_REPO="${LLAMA_MODEL_REPO:-Qwen/Qwen3.5-1.5B-GGUF}"
-LLAMA_MODEL_FILE="${LLAMA_MODEL_FILE:-qwen3.5-1.5b-q8_0.gguf}"
+# Jetson defaults: gemma-4-26b-A4B (MoE: 26B total, 4B active — fits in 64GB, runs at 4B speed)
+# Q4_K_M is ~17GB; override with LLAMA_MODEL_REPO/FILE env vars to use a different model.
+LLAMA_MODEL_REPO="${LLAMA_MODEL_REPO:-bartowski/google_gemma-4-26B-A4B-it-GGUF}"
+LLAMA_MODEL_FILE="${LLAMA_MODEL_FILE:-google_gemma-4-26B-A4B-it-Q4_K_M.gguf}"
 LLAMA_MODEL_DIR="${LLAMA_MODEL_DIR:-/app/models}"
 LLAMA_PORT="${LLAMA_PORT:-8000}"
 LLAMA_CTX="${LLAMA_CTX:-4096}"
