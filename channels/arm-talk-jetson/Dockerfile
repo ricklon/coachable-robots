@@ -73,6 +73,7 @@ RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         -DLLAMA_BUILD_SERVER=ON \
         -DGGML_CUDA=ON \
         -DGGML_NATIVE=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
     && cmake --build /tmp/llama.cpp/build -j$(nproc) --target llama-server llama-cli \
     && mkdir -p /app/bin \
     && cp /tmp/llama.cpp/build/bin/llama-server /app/bin/llama-server \

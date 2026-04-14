@@ -58,6 +58,7 @@ RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLAMA_BUILD_SERVER=ON \
         -DGGML_NATIVE=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
     && cmake --build /tmp/llama.cpp/build -j4 --target llama-server llama-cli \
     && mkdir -p /app/bin \
     && cp /tmp/llama.cpp/build/bin/llama-server /app/bin/llama-server \
@@ -81,14 +82,15 @@ RUN git clone --depth 1 --branch "${TALKBOT_BRANCH}" \
 # /app/scripts/start-llama-server.sh downloads on first run if model not present,
 # then starts llama-server on port 8000.
 COPY channels/arm-talk/scripts/start-llama-server.sh /app/scripts/start-llama-server.sh
-RUN chmod +x /app/scripts/start-llama-server.sh
+COPY channels/arm-talk/scripts/entrypoint.sh /app/scripts/arm-talk-entrypoint.sh
+RUN chmod +x /app/scripts/start-llama-server.sh /app/scripts/arm-talk-entrypoint.sh
 
 # ── ports ─────────────────────────────────────────────────────────────────────
 EXPOSE 22
 EXPOSE 7860
 EXPOSE 8000
 
-# ── Entrypoint inherited from arm (sshd + tailscale + CMD) ────────────────────
-# Default CMD starts llama-server in the background, then talkbot serve in foreground.
-# Override CMD to run just sshd/tailscale without the talkbot UI.
-CMD ["/app/scripts/start-llama-server.sh"]
+# ── Entrypoint: arm-talk specific (CHI@Edge Zun ignores Dockerfile CMD) ───────
+# Uses a channel-specific entrypoint that always starts llama-server + talkbot
+# after sshd + tailscale, since Zun does not pass CMD through.
+ENTRYPOINT ["/app/scripts/arm-talk-entrypoint.sh"]
