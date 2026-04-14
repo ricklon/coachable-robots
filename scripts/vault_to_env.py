@@ -128,6 +128,10 @@ def load_fleet_config() -> dict[str, str]:
         result["TALKBOT_LOCAL_SERVER_URL"] = talkbot["local_server_url"]
     if "agent_prompt" in talkbot:
         result["TALKBOT_AGENT_PROMPT"] = talkbot["agent_prompt"]
+    # Quote values that contain spaces (required for .env / just parsing)
+    for k, v in result.items():
+        if " " in v and not (v.startswith('"') and v.endswith('"')):
+            result[k] = f'"{v}"'
     if result:
         print(f"  Fleet config loaded: {fleet_path.name}")
     return result
