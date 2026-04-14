@@ -51,11 +51,10 @@ TALKBOT_PORT="${TALKBOT_PORT:-7860}"
 TALKBOT_HOST="${TALKBOT_HOST:-0.0.0.0}"
 
 echo "[entrypoint] starting talkbot serve on ${TALKBOT_HOST}:${TALKBOT_PORT}"
-echo "[entrypoint] inference backend: ${TALKBOT_LLM_BACKEND:-local_server}"
+echo "[entrypoint] inference backend: ${TALKBOT_LLM_PROVIDER:-local_server}"
 echo "[entrypoint] server url: ${TALKBOT_LOCAL_SERVER_URL:-http://127.0.0.1:8000/v1}"
 
 cd /app/talkbot
 exec uv run talkbot serve \
     --host "${TALKBOT_HOST}" \
-    --port "${TALKBOT_PORT}" \
-    --no-tts
+    --port "${TALKBOT_PORT}"
