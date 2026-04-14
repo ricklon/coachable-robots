@@ -107,6 +107,19 @@ coaches:
   #   hf_user: coachable-lab
   #   role: agent                     # autonomous agent coach — same workflow as a student
 
+# ── Talkbot ───────────────────────────────────────────────────────────────────
+# Fleet-wide talkbot configuration. These values are written to .env by
+# `just vault-to-env`, so they never need to be set manually.
+#
+# llm_backend options:
+#   openrouter    — cloud inference (key from vault_openrouter_api_key)
+#   local_server  — llama-server on local_server_url (Jetson/MI100)
+talkbot:
+  llm_backend: openrouter
+  local_server_url: http://train-mi100:8000/v1   # used when llm_backend=local_server
+  # Agent personality — append /no_think for all Qwen3 models
+  agent_prompt: "You are a coaching assistant for a robot arm. Help the student record quality demonstration episodes. /no_think"
+
 # ── HuggingFace ───────────────────────────────────────────────────────────────
 hf:
   org: coachable-lab                  # HF org or username prefix

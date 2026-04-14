@@ -21,12 +21,14 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT   = Path(__file__).parent.parent
-VAULT_FILE  = REPO_ROOT / "ansible" / "group_vars" / "all" / "vault.yml"
-VARS_FILE   = REPO_ROOT / "ansible" / "group_vars" / "all" / "vars.yml"
-VAULT_PASS  = REPO_ROOT / "ansible" / ".vault_pass"
-ENV_EXAMPLE = REPO_ROOT / ".env.example"
-ENV_OUT     = REPO_ROOT / ".env"
+REPO_ROOT    = Path(__file__).parent.parent
+VAULT_FILE   = REPO_ROOT / "ansible" / "group_vars" / "all" / "vault.yml"
+VARS_FILE    = REPO_ROOT / "ansible" / "group_vars" / "all" / "vars.yml"
+VAULT_PASS   = REPO_ROOT / "ansible" / ".vault_pass"
+ENV_EXAMPLE  = REPO_ROOT / ".env.example"
+ENV_OUT      = REPO_ROOT / ".env"
+FLEET_FILE   = REPO_ROOT / "config" / "fleet.yaml"
+FLEET_EXAMPLE = REPO_ROOT / "config" / "fleet.example.yaml"
 
 # Maps vault variable names → .env key names
 VAULT_MAP = {
@@ -114,12 +116,30 @@ def load_existing_env() -> dict[str, str]:
     return existing
 
 
+def load_fleet_config() -> dict[str, str]:
+    """Read fleet.yaml (or fleet.example.yaml) and return talkbot config as env vars."""
+    fleet_path = FLEET_FILE if FLEET_FILE.exists() else FLEET_EXAMPLE
+    fleet = yaml.safe_load(fleet_path.read_text()) or {}
+    talkbot = fleet.get("talkbot", {})
+    result = {}
+    if "llm_backend" in talkbot:
+        result["TALKBOT_LLM_BACKEND"] = talkbot["llm_backend"]
+    if "local_server_url" in talkbot:
+        result["TALKBOT_LOCAL_SERVER_URL"] = talkbot["local_server_url"]
+    if "agent_prompt" in talkbot:
+        result["TALKBOT_AGENT_PROMPT"] = talkbot["agent_prompt"]
+    if result:
+        print(f"  Fleet config loaded: {fleet_path.name}")
+    return result
+
+
 def build_env(vault: dict, dry_run: bool = False) -> None:
     defaults = load_env_example()
     existing = load_existing_env()
+    fleet    = load_fleet_config()
 
-    # Start from example defaults, overlay existing, overlay vault
-    merged = {**defaults, **existing}
+    # Priority (highest wins): vault > fleet > existing > example defaults
+    merged = {**defaults, **existing, **fleet}
 
     # Apply vault mappings
     vault_applied = []
@@ -144,6 +164,7 @@ def build_env(vault: dict, dry_run: bool = False) -> None:
             masked = v[:4] + "***" if any(s in k for s in ("TOKEN", "SECRET", "KEY", "PASSWORD")) else v
             print(f"  {k}={masked}")
         print(f"\nVault values applied: {', '.join(vault_applied)}")
+        print(f"Fleet config applied: {', '.join(fleet.keys()) or 'none'}")
         return
 
     # Write .env preserving example structure (comments + ordering)
