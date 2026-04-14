@@ -7,6 +7,12 @@
 
 set -e
 
+# ── Export container env to SSH sessions ──────────────────────────────────────
+# SSH sessions start a fresh shell and don't inherit the container's PID 1 env.
+# Write all env vars to /etc/environment so they're available to every session.
+printenv | grep -v '^_=' | grep -v '^SHLVL=' > /etc/environment
+echo "[entrypoint] env exported to /etc/environment ($(wc -l < /etc/environment) vars)"
+
 # ── SSH daemon ──
 mkdir -p /run/sshd /root/.ssh
 chmod 700 /root/.ssh
