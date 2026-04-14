@@ -53,9 +53,11 @@
 # Build without model (if network is fixed or for local dev):
 #   Override start-llama-server.sh to download at runtime (already does this as fallback).
 
-# JetPack 6.x + CUDA 12.6 + Python 3.12
+# JetPack 6.1 (L4T r36.4) + CUDA 12.8 + Python 3.12
 # dustynv containers: https://github.com/dusty-nv/jetson-containers
-FROM dustynv/python:3.12-r36.4.0
+# Tag confirmed for L4T r36.4 / JetPack 6.1 (kernel 5.15.148-l4t-r36.4)
+# NOTE: dustynv/python:3.12-r36.4.0 does NOT exist — use pytorch base for CUDA + Python 3.12
+FROM dustynv/pytorch:2.8-r36.4-cu128-24.04
 
 # ── System deps ────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \

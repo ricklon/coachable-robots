@@ -250,14 +250,17 @@ def reserve(restart_container: bool = False, no_fip: bool = False) -> None:
             if val:
                 env[var] = val
 
+        use_nvidia = os.getenv("JETSON_RUNTIME", "nvidia").lower() == "nvidia"
+        print(f"  Runtime: {'nvidia (GPU access)' if use_nvidia else 'default'}")
         print(f"  Creating container '{CONTAINER_NAME}'...")
         my_container = Container(
             name=CONTAINER_NAME,
             image_ref=IMAGE_REF,
             reservation_id=reservation_id,
-            command=["sleep", "infinity"],
             environment=env,
             device_profiles=[],  # Jetson: no serial/camera profiles needed
+            exposed_ports=["22/tcp", "7860/tcp", "8000/tcp"],
+            runtime="nvidia" if use_nvidia else None,
         )
         submitted = my_container.submit(
             wait_for_active=True, wait_timeout=900, show=None, idempotent=True
@@ -302,11 +305,45 @@ def release() -> None:
         print(f"No lease {JETSON_LEASE_ID} found")
 
 
+def assign_fip() -> None:
+    """Assign a floating IP to the existing running container."""
+    setup_chi_edge()
+    my_container = get_existing_container()
+    if not my_container:
+        sys.exit(f"ERROR: Container '{CONTAINER_NAME}' not found")
+    print(f"Container: {my_container.name} ({my_container.status})")
+    existing = get_container_floating_ip(my_container)
+    if existing:
+        print(f"Already has floating IP: {existing}")
+        return
+    try:
+        fip = my_container.associate_floating_ip()
+        print(f"Floating IP assigned: {fip}")
+    except Exception as exc:
+        sys.exit(f"ERROR: Could not assign floating IP: {exc}")
+
+
+def zun_exec(cmd: str) -> None:
+    """Execute a command in the running container via Zun (no SSH/Tailscale needed)."""
+    setup_chi_edge()
+    my_container = get_existing_container()
+    if not my_container:
+        sys.exit(f"ERROR: Container '{CONTAINER_NAME}' not found")
+    result = clients.zun().containers.execute(my_container.name, command=cmd, run=True)
+    output = result.get("output", "") if isinstance(result, dict) else str(result)
+    exit_code = result.get("exit_code") if isinstance(result, dict) else None
+    print(output, end="")
+    if exit_code is not None and exit_code != 0:
+        sys.exit(exit_code)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--status", action="store_true", help="Show current lease/container state as JSON")
     group.add_argument("--release", action="store_true", help="Delete container and lease (requires COACHABLE_CONFIRM_RELEASE=yes)")
+    group.add_argument("--assign-fip", action="store_true", help="Assign floating IP to running container")
+    group.add_argument("--exec", metavar="CMD", help="Execute a command in the container via Zun (no SSH needed)")
     parser.add_argument("--restart-container", action="store_true",
                         help="Delete and recreate container (keeps lease)")
     parser.add_argument("--no-fip", action="store_true", help="Do not associate a floating IP")
@@ -316,6 +353,10 @@ def main() -> None:
         status()
     elif args.release:
         release()
+    elif args.assign_fip:
+        assign_fip()
+    elif args.exec:
+        zun_exec(args.exec)
     else:
         reserve(restart_container=args.restart_container, no_fip=args.no_fip)
 

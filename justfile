@@ -114,7 +114,16 @@ jetson-status:
 
 # Delete and recreate the Jetson container (keeps lease; picks up .env changes)
 restart-jetson:
-    uv run python scripts/reserve_jetson.py --restart-container --no-fip
+    uv run python scripts/reserve_jetson.py --restart-container
+
+# Assign a floating IP to the running Jetson container (enables outbound internet)
+assign-jetson-fip:
+    uv run python scripts/reserve_jetson.py --assign-fip
+
+# Execute a command in the Jetson container via Zun API (no SSH/Tailscale needed)
+# Usage: just jetson-zun-exec cmd="ls /dev/nvidia*"
+jetson-zun-exec cmd="":
+    uv run python scripts/reserve_jetson.py --exec "{{cmd}}"
 
 # SSH into talkbot-orin via Tailscale
 jetson-ssh:

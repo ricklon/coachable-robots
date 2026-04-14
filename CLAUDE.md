@@ -621,22 +621,35 @@ This is a CHI@Edge platform issue — a helpdesk ticket has been filed.
 Workaround: set `EDGE_DEVICE_PROFILES=` (empty) to launch container without device profiles.
 The container will run (Tailscale + sshd work), but arm control requires device passthrough.
 
-### CHI@Edge: Jetson AGX Orin — no outbound internet from containers
+### CHI@Edge: Jetson AGX Orin — GPU access and networking
 
-`jetson-agx-orin-devkit-64gb-1` containers have no outbound internet access.
-DNS (10.43.0.10 CoreDNS) doesn't resolve external names, and TCP connections time out.
+**GPU access**: Use `runtime="nvidia"` when creating the Zun container. This mounts NVIDIA
+device nodes into the container: `/dev/nvidia0`, `/dev/nvidiactl`, `/dev/nvidia-modeset`,
+`/dev/dri/renderD128`. The `reserve_jetson.py` script sets this by default (via `JETSON_RUNTIME=nvidia`).
+
+**L4T version**: Kernel `5.15.148-l4t-r36.4-1012.12` = JetPack 6.1 / L4T r36.4.
+Use L4T-compatible base images (e.g. `nvcr.io/nvidia/l4t-jetpack:r36.4.0`).
+The `dustynv/python:3.12-r36.4.0` tag does not exist.
+
+**Outbound internet**: Containers have no outbound internet access. DNS (10.43.0.10 CoreDNS)
+doesn't resolve external names, and TCP connections time out.
+A floating IP (129.114.34.212 assigned to talkbot-orin-container) provides inbound routing
+but NOT outbound NAT — container traffic still can't reach the internet.
 This prevents Tailscale from registering and blocks OpenRouter/HuggingFace API calls.
 
-Root cause: The Jetson device is on a different CHI@Edge network segment (different facility)
-from the soarm101 devices; egress filtering appears more restrictive.
+**Build strategy**: All large dependencies (llama.cpp CUDA build, model weights) must be
+baked into the image at build time on a machine with ARM64 + CUDA headers (another Jetson,
+or NVIDIA Grace Hopper cloud instance). The k8s NODE has internet for image pulls;
+the container POD does not.
 
-Status: Helpdesk ticket to be filed. Use arm-01 (soarm101-1) for benchmarks in the meantime.
+**Inbound SSH via floating IP**: Not working (security group likely blocks port 22 inbound).
+Use Zun exec (`just jetson-zun-exec`) or wait for Tailscale to work (requires outbound fix).
 
-Diagnostics run:
-- `/etc/resolv.conf` shows `nameserver 10.43.0.10` (k8s CoreDNS)
-- `/proc/net/route` shows `169.254.1.1` gateway on eth0 (k8s CNI, normal)
-- `socket.gethostbyname('controlplane.tailscale.com')` times out (DNS failing)
-- Tailscale logs show all DERP bootstrap IPs timing out or IPv6 unreachable
+Status: Helpdesk ticket needed for outbound internet. GPU is working.
+Diagnostics:
+- `nameserver 10.43.0.10` (k8s CoreDNS, no external forwarding)
+- `169.254.1.1` gateway (k8s CNI) — no egress NAT
+- All TCP connectivity checks: FAIL (timed out)
 
 ### CHI@Edge: image not updated after rebuild
 
