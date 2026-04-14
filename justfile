@@ -432,9 +432,6 @@ push-arm-talk:
     @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
     @echo "Then run: just restart-arm"
-    @echo "Pushed: rianders/lerobot-soarm101:arm-talk-{{_date}}"
-    @echo "Update .env: EDGE_IMAGE_REF=rianders/lerobot-soarm101:arm-talk-{{_date}}"
-    @echo "Then run: just restart-arm"
 
 # Build and push the full channel stack: arm base then arm-talk
 push-all-channels: push-arm push-arm-talk

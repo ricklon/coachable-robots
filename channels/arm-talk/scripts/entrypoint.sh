@@ -1,9 +1,9 @@
 #!/bin/bash
 # channels/arm-talk/scripts/entrypoint.sh
 #
-# Extended entrypoint for arm-talk channel.
-# CHI@Edge Zun ignores Dockerfile CMD — this entrypoint always starts
-# llama-server + talkbot serve after sshd + tailscale.
+# CHI@Edge Zun ignores Dockerfile CMD — this entrypoint starts everything.
+# Inference is REMOTE — set TALKBOT_LOCAL_SERVER_URL to point at your
+# Jetson, MI100, or set TALKBOT_LLM_BACKEND=openrouter for cloud inference.
 
 set -e
 
@@ -16,7 +16,7 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
     chmod 600 /root/.ssh/authorized_keys
 fi
 
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/'          /etc/ssh/sshd_config
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/'              /etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/'    /etc/ssh/sshd_config
 
@@ -38,7 +38,18 @@ else
     echo "[entrypoint] TS_AUTHKEY not set — skipping tailscale"
 fi
 
-# ── Start talkbot (llama-server + Gradio UI) ──
-# CHI@Edge Zun does not honor Dockerfile CMD — start explicitly here.
-echo "[entrypoint] starting talkbot stack..."
-exec /app/scripts/start-llama-server.sh
+# ── Talkbot Gradio UI ──────────────────────────────────────────────────────────
+# Inference is remote — TALKBOT_LOCAL_SERVER_URL points at Jetson/MI100/OpenRouter.
+# Default falls back to http://127.0.0.1:8000/v1 (useful for local testing).
+TALKBOT_PORT="${TALKBOT_PORT:-7860}"
+TALKBOT_HOST="${TALKBOT_HOST:-0.0.0.0}"
+
+echo "[entrypoint] starting talkbot serve on ${TALKBOT_HOST}:${TALKBOT_PORT}"
+echo "[entrypoint] inference backend: ${TALKBOT_LLM_BACKEND:-local_server}"
+echo "[entrypoint] server url: ${TALKBOT_LOCAL_SERVER_URL:-http://127.0.0.1:8000/v1}"
+
+cd /app/talkbot
+exec uv run talkbot serve \
+    --host "${TALKBOT_HOST}" \
+    --port "${TALKBOT_PORT}" \
+    --no-tts
