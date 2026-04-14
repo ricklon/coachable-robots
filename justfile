@@ -490,6 +490,17 @@ push-arm-talk:
 # Build and push the full channel stack: arm base then arm-talk
 push-all-channels: push-arm push-arm-talk
 
+# Build and push diagnostic container for CHI@Edge Jetson (fast pull, rich tooling)
+# Runs network/GPU/device diagnostics at startup → writes /tmp/diag.json → sleep infinity
+# Read results: just jetson-exec cmd="cat /tmp/diag.json"
+push-diag:
+    docker buildx build --platform linux/arm64 --push \
+        -t rianders/lerobot-soarm101:diag-{{_date}} \
+        -f channels/diag/Dockerfile .
+    @echo "Pushed: rianders/lerobot-soarm101:diag-{{_date}}"
+    @echo "Update .env: JETSON_IMAGE_REF=rianders/lerobot-soarm101:diag-{{_date}}"
+    @echo "Then run: just restart-jetson"
+
 # Build arm-talk-jetson image (Jetson Orin: CUDA-enabled llama-server + talkbot)
 # Must be built ON the Jetson (native arm64 + CUDA headers) — not cross-compiled
 build-arm-talk-jetson:
