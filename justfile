@@ -102,6 +102,32 @@ restart-arm:
 edge-status:
     uv run python scripts/reserve_edge.py --status
 
+# ── Jetson AGX Orin (talkbot inference node) ──────────────────────────────────
+
+# Create talkbot-orin-container on CHI@Edge Jetson (lease must exist; set JETSON_LEASE_ID in .env)
+reserve-jetson:
+    uv run python scripts/reserve_jetson.py
+
+# Show current Jetson lease/container/tailscale state as JSON
+jetson-status:
+    uv run python scripts/reserve_jetson.py --status
+
+# Delete and recreate the Jetson container (keeps lease; picks up .env changes)
+restart-jetson:
+    uv run python scripts/reserve_jetson.py --restart-container --no-fip
+
+# SSH into talkbot-orin via Tailscale
+jetson-ssh:
+    ssh root@${JETSON_TS_HOSTNAME:-talkbot-orin}
+
+# Run a command on the Jetson via SSH
+jetson-exec cmd="":
+    ssh root@${JETSON_TS_HOSTNAME:-talkbot-orin} "{{cmd}}"
+
+# Release Jetson container and lease (requires COACHABLE_CONFIRM_RELEASE=yes)
+release-jetson:
+    uv run python scripts/reserve_jetson.py --release
+
 # Show CHI@Edge device enrollment and health details
 edge-device-show:
     bash -lc 'source "${EDGE_RC_FILE:-ansible/app-cred-chi-edge-openrc.sh}" && unset OS_PROJECT_ID OS_PROJECT_NAME OS_PROJECT_DOMAIN_ID OS_PROJECT_DOMAIN_NAME && uv run chi-edge device show "${EDGE_DEVICE_NAME:-soarm101-1}"'
