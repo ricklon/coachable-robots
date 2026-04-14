@@ -78,5 +78,4 @@ export TALKBOT_LOCAL_SERVER_URL="http://127.0.0.1:${LLAMA_PORT}/v1"
 
 exec uv run talkbot serve \
     --host "${TALKBOT_HOST}" \
-    --port "${TALKBOT_PORT}" \
-    --no-tts
+    --port "${TALKBOT_PORT}"
