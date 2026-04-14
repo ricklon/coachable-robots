@@ -74,7 +74,7 @@ RUN git clone --depth 1 --branch "${TALKBOT_BRANCH}" \
     && cd /app/talkbot \
     && pip install uv \
     && uv sync --extra gradio \
-    && uv run talkbot --version
+    && uv run talkbot --help > /dev/null
 
 # ── model download script ─────────────────────────────────────────────────────
 # Models are NOT baked into the image — too large (~800 MB) and frequently updated.

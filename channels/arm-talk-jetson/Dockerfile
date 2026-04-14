@@ -87,7 +87,7 @@ RUN git clone --depth 1 --branch "${TALKBOT_BRANCH}" \
     && cd /app/talkbot \
     && pip install uv \
     && uv sync --extra gradio \
-    && uv run talkbot --version
+    && uv run talkbot --help > /dev/null
 
 # ── entrypoint + startup script ───────────────────────────────────────────────
 COPY docker/scripts/entrypoint.sh /app/scripts/entrypoint.sh
