@@ -11,8 +11,11 @@ Usage:
 """
 
 import argparse
+import contextlib
+import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -24,27 +27,75 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=False)
 
 import chi
-from chi import clients, lease as lease_api, network as chi_network
-from chi.container import Container
+import openstack
+from chi import lease as lease_api, network as chi_network
+from chi.container import Container, create_container, get_container
 from chi.lease import Lease
+from keystoneauth1 import adapter
+import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
+
+FLEET_FILE = REPO_ROOT / "config" / "fleet.yaml"
+FLEET_EXAMPLE = REPO_ROOT / "config" / "fleet.example.yaml"
+EDGE_ARM_ID = os.getenv("EDGE_ARM_ID", os.getenv("TS_HOSTNAME", "arm-01"))
+
+
+def _profile_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    stripped = value.strip()
+    if stripped.lower() in ("none", "no", "false", "[]"):
+        return []
+    if stripped.startswith("["):
+        parsed = yaml.safe_load(stripped)
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            sys.exit("ERROR: EDGE_DEVICE_PROFILES list syntax must contain only strings")
+        return parsed
+    return [item.strip() for item in stripped.split(",") if item.strip()]
+
+
+def _env_or_default(name: str, default: str) -> str:
+    value = os.getenv(name)
+    return value if value else default
+
+
+def load_edge_arm_config() -> dict:
+    fleet_path = FLEET_FILE if FLEET_FILE.exists() else FLEET_EXAMPLE
+    try:
+        fleet = yaml.safe_load(fleet_path.read_text()) or {}
+    except FileNotFoundError:
+        return {}
+
+    arms = fleet.get("fleet", {}).get("arms", [])
+    for arm in arms:
+        if arm.get("id") == EDGE_ARM_ID or arm.get("tailscale_host") == EDGE_ARM_ID:
+            return arm
+    return {}
+
+
+EDGE_ARM_CONFIG = load_edge_arm_config()
+EDGE_CONTAINER_CONFIG = EDGE_ARM_CONFIG.get("chi_edge", {})
 
 EDGE_RC_FILE = Path(os.getenv("EDGE_RC_FILE", REPO_ROOT / "ansible" / "app-cred-chi-edge-openrc.sh"))
 LEASE_NAME = os.getenv("EDGE_LEASE_NAME", "lerobot-soarm101-lease")
 UNIQUE_LEASE_NAMES = os.getenv("EDGE_UNIQUE_LEASE_NAMES", "yes").lower() in ("1", "true", "yes")
-CONTAINER_NAME = os.getenv("EDGE_CONTAINER_NAME", "lerobot-soarm101-container")
-DEVICE_NAME = os.getenv("EDGE_DEVICE_NAME", "soarm101-1")
+CONTAINER_NAME = _env_or_default(
+    "EDGE_CONTAINER_NAME",
+    EDGE_CONTAINER_CONFIG.get("container_name", "lerobot-soarm101-container"),
+)
+DEVICE_NAME = _env_or_default("EDGE_DEVICE_NAME", EDGE_ARM_CONFIG.get("chi_device", "soarm101-1"))
 LEASE_DAYS = int(os.getenv("EDGE_LEASE_DAYS", "7"))
-IMAGE_REF = os.getenv("EDGE_IMAGE_REF", "rianders/lerobot-soarm101:chi-edge")
-DEVICE_PROFILES = [
-    item.strip()
-    for item in os.getenv(
-        "EDGE_DEVICE_PROFILES",
-        "ttyacm0,ttyacm1,video0,video1,video2,video3",
-    ).split(",")
-    if item.strip()
-]
+IMAGE_REF = _env_or_default(
+    "EDGE_IMAGE_REF",
+    EDGE_CONTAINER_CONFIG.get("image_ref", "rianders/lerobot-soarm101:chi-edge"),
+)
+_device_profiles_override = os.getenv("EDGE_DEVICE_PROFILES")
+DEVICE_PROFILES = (
+    _profile_list(_device_profiles_override)
+    if _device_profiles_override
+    else EDGE_CONTAINER_CONFIG.get("device_profiles", ["ttyacm0", "ttyacm1", "video0", "video1"])
+)
 
 
 def load_edge_openrc() -> None:
@@ -52,7 +103,7 @@ def load_edge_openrc() -> None:
         sys.exit(f"ERROR: CHI@Edge RC file not found: {EDGE_RC_FILE}")
 
     result = subprocess.run(
-        ["bash", "-lc", f"set -a && source {EDGE_RC_FILE} && env"],
+        ["bash", "-lc", f"set -a && source {shlex.quote(str(EDGE_RC_FILE))} && env"],
         capture_output=True,
         text=True,
         check=True,
@@ -63,21 +114,37 @@ def load_edge_openrc() -> None:
             os.environ[key] = value
 
 
-def setup_chi_edge() -> None:
+def setup_chi_edge(quiet: bool = False) -> None:
     load_edge_openrc()
     if os.getenv("OS_REGION_NAME") != "CHI@Edge":
         sys.exit(f"ERROR: {EDGE_RC_FILE} is for {os.getenv('OS_REGION_NAME')}, not CHI@Edge")
 
-    # Application credentials are already scoped. Project scope env vars cause
-    # Keystone to reject auth with "Application credentials cannot request a scope."
-    for key in ("OS_PROJECT_ID", "OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME"):
-        os.environ.pop(key, None)
+    auth_type = os.getenv("OS_AUTH_TYPE", "").lower()
+    has_app_credential = bool(os.getenv("OS_APPLICATION_CREDENTIAL_ID"))
+    use_app_credential = auth_type == "v3applicationcredential" or has_app_credential
+    if use_app_credential:
+        # Application credentials are already scoped. Project scope env vars
+        # cause Keystone to reject auth with:
+        # "Application credentials cannot request a scope."
+        for key in ("OS_PROJECT_ID", "OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_ID", "OS_PROJECT_DOMAIN_NAME"):
+            os.environ.pop(key, None)
 
     chi.reset()
-    chi.use_site("CHI@Edge")
-    chi.set("auth_type", "v3applicationcredential")
-    chi.set("application_credential_id", os.environ.get("OS_APPLICATION_CREDENTIAL_ID"))
-    chi.set("application_credential_secret", os.environ.get("OS_APPLICATION_CREDENTIAL_SECRET"))
+    if quiet:
+        with contextlib.redirect_stdout(io.StringIO()):
+            chi.use_site("CHI@Edge")
+    else:
+        chi.use_site("CHI@Edge")
+
+    if use_app_credential:
+        chi.set("auth_type", "v3applicationcredential")
+        chi.set("application_credential_id", os.environ.get("OS_APPLICATION_CREDENTIAL_ID"))
+        chi.set("application_credential_secret", os.environ.get("OS_APPLICATION_CREDENTIAL_SECRET"))
+    elif auth_type:
+        # Preserve user/JupyterHub OpenRC auth. This is the path used by
+        # teaching notebooks, and it may have CHI@Edge lease-create privileges
+        # that app credentials do not.
+        chi.set("auth_type", os.getenv("OS_AUTH_TYPE"))
 
 
 def get_existing_lease():
@@ -121,20 +188,12 @@ def next_lease_name() -> str:
 
 
 def get_existing_container():
-    try:
-        zun = clients.zun()
-        matches = [c for c in zun.containers.list() if c.name == CONTAINER_NAME]
-        if matches:
-            return Container.from_zun_container(matches[0])
-    except Exception:
-        return None
-    return None
+    return get_container(CONTAINER_NAME)
 
 
 def get_container_floating_ip(container: Container) -> str | None:
     try:
-        zun = clients.zun()
-        current = zun.containers.get(container.name)
+        current = container.zun_container
         port_id = None
         for addrs in current.addresses.values():
             port_id = next((addr["port"] for addr in addrs if addr.get("port")), None)
@@ -211,19 +270,49 @@ def status() -> None:
     sys.exit(0 if state["lease"] else 2)
 
 
+def _redact_inventory(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_lower = key.lower()
+            if (
+                key_lower.endswith("_secret")
+                or key_lower.endswith("_api_key")
+                or key_lower.endswith("_bootstrap_token")
+            ):
+                redacted[key] = "************"
+            else:
+                redacted[key] = _redact_inventory(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_inventory(item) for item in value]
+    return value
+
+
+def list_devices() -> None:
+    setup_chi_edge(quiet=True)
+    conn = openstack.connect()
+    client = adapter.Adapter(conn.session, interface="public", service_type="inventory")
+    response = client.get("/v1/hardware/").json()
+    print(json.dumps(_redact_inventory(response), indent=2, sort_keys=True))
+    sys.exit(0 if response.get("hardware") else 2)
+
+
 PORTAL_LEASE_URL = "https://chi.edge.chameleoncloud.org/project/leases/"
 
 
 def _portal_create_hint(lease_name: str) -> str:
     return (
-        "CHI@Edge device leases must be created via the portal or Chameleon JupyterHub.\n"
-        "  Application credentials only carry member+reader roles; Blazar lease creation\n"
-        "  requires the admin role granted in the Chameleon web UI session.\n\n"
-        f"  1. Open: {PORTAL_LEASE_URL}\n"
-        f"  2. Click '+ Create Lease'\n"
-        f"  3. Resource type: Device, device name: {DEVICE_NAME}\n"
-        f"  4. Duration: {LEASE_DAYS} day(s), name: {lease_name}\n"
-        "  5. Once the lease is ACTIVE, re-run this script to continue.\n"
+        "python-chi supports CHI@Edge device lease creation with\n"
+        "  Lease(...).add_device_reservation(device_name=...).\n"
+        "This failure means the current CHI@Edge auth/session or Blazar state rejected\n"
+        "the lease request, not that Python lease creation is unsupported.\n\n"
+        "Try the same request from a Chameleon JupyterHub/user OpenRC session, or create\n"
+        "the lease in the portal and pin EDGE_LEASE_ID if the scripted path still fails.\n\n"
+        f"  Portal fallback: {PORTAL_LEASE_URL}\n"
+        f"  Resource type: Device, device name: {DEVICE_NAME}\n"
+        f"  Duration: {LEASE_DAYS} day(s), name: {lease_name}\n"
+        "  Once the lease is ACTIVE, set EDGE_LEASE_ID=<lease-id> and re-run.\n"
     )
 
 
@@ -305,17 +394,44 @@ def reserve(lease_only: bool = False, no_fip: bool = False, restart_container: b
             val = os.getenv(var, "")
             if val:
                 env[var] = val
-        my_container = Container(
+        created = create_container(
             name=CONTAINER_NAME,
-            image_ref=IMAGE_REF,
+            image=IMAGE_REF,
             reservation_id=reservation_id,
             command=["sleep", "infinity"],
             environment=env,
             device_profiles=DEVICE_PROFILES,
+            hints={"platform_version": "2"},
         )
-        submitted = my_container.submit(wait_for_active=True, wait_timeout=600, show=None, idempotent=True)
-        if submitted is not None:
-            my_container = submitted
+        my_container = get_container(created.uuid)
+        if not my_container:
+            sys.exit(f"ERROR: Container create returned {created.uuid}, but it could not be retrieved")
+        my_container.wait(status="Running", timeout=600)
+
+        # Verify the container actually reached Running. python-chi's wait()
+        # returns on Error so callers can inspect the platform status reason.
+        current = my_container.zun_container
+        if current.status == "Error":
+            reason = getattr(current, "status_reason", "unknown") or "unknown"
+            profiles_hint = ""
+            if "Insufficient smarter-devices" in reason or "Insufficient" in reason:
+                profiles_hint = (
+                    f"\n\n  Device profiles requested: {DEVICE_PROFILES}"
+                    f"\n  The smarter-device-manager on {DEVICE_NAME} cannot satisfy these profiles."
+                    f"\n  This means the physical devices are not currently visible to the Pi node."
+                    f"\n"
+                    f"\n  Checklist:"
+                    f"\n    - Are the cameras (USB) and arm (ttyACM0/1) plugged into the Pi?"
+                    f"\n    - Has enough time passed after deleting the previous container (~60s)?"
+                    f"\n    - Check CHI@Edge portal: https://chi.edge.chameleoncloud.org/project/leases/"
+                    f"\n"
+                    f"\n  To run without device passthrough (SSH/Tailscale only):"
+                    f"\n    Set EDGE_DEVICE_PROFILES= (empty) in .env, then: just restart-arm"
+                )
+            sys.exit(
+                f"ERROR: Container entered Error state immediately after creation.\n"
+                f"  Reason: {reason}{profiles_hint}"
+            )
         print(f"  Container running: {my_container.id}")
 
     if not no_fip:
@@ -356,6 +472,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--status", action="store_true", help="Show current CHI@Edge lease/container state")
+    group.add_argument("--devices", action="store_true", help="List registered CHI@Edge devices as redacted JSON")
     group.add_argument("--release", action="store_true", help="Release CHI@Edge container and lease")
     parser.add_argument("--lease-only", action="store_true", help="Create/reuse only the device lease")
     parser.add_argument("--no-fip", action="store_true", help="Do not associate a floating IP")
@@ -365,6 +482,8 @@ def main() -> None:
 
     if args.status:
         status()
+    elif args.devices:
+        list_devices()
     elif args.release:
         release()
     else:
