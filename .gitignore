@@ -194,6 +194,7 @@ cython_debug/
 ansible/.vault_pass
 ansible/inventory.ini
 ansible/*-openrc.sh
+ansible/*-openrc-*.sh
 ansible/group_vars/all/vars.yml
 ansible/group_vars/all/vault.yml
 
