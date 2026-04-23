@@ -3,6 +3,25 @@
 Step-by-step guide for coaches (students, instructors, agents) working with
 SO-ARM101 robots on the coachable platform.
 
+> **Current path:** for CHI@Edge + Tailscale operation and the first real
+> LeRobot training session, use
+> [lerobot-training-session.md](lerobot-training-session.md). This file keeps
+> the local Balena/Pi workflow because it is still useful for host-level repair,
+> camera isolation, and offline robot work.
+
+## Access Modes
+
+Use one robot owner at a time:
+
+| Mode | Access | Use |
+|------|--------|-----|
+| CHI@Edge container | `just arm-*`, `ssh root@arm-01` | Current teaching/training path |
+| Balena host | `ssh -p 22222 root@192.168.4.191` | Host repair, local preview, device checks |
+| MI100 training node | `just reserve`, `just provision`, `ssh cc@train-mi100` | Cloud training |
+
+The Pi has one set of serial ports and cameras. Do not run Balena preview,
+Balena robot workloads, and CHI@Edge robot workloads at the same time.
+
 ## Prerequisites
 
 - Pi 5 running BalenaOS with `rianders/lerobot-soarm101:latest` pulled
