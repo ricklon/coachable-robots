@@ -28,9 +28,13 @@ All teleop types (keyboard, gamepad, phone) work with both robots.
 
 ### Pi 5 (CHI@Edge)
 
-Runs inside a Docker container managed by `Request_LeRobot_SOARM101.ipynb`.
-The container image (`rianders/lerobot-soarm101:main`) includes LeRobot
-and all dependencies. No manual install needed.
+Runs inside a CHI@Edge container created by `just reserve-edge` or
+`just restart-arm`. The arm channel image includes LeRobot, Tailscale, SSH, and
+the coachable operator tools. Access the running container over the tailnet:
+
+```bash
+ssh root@arm-01
+```
 
 ### Pi 5 (Local)
 

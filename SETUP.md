@@ -1,236 +1,221 @@
 # Instance Setup
 
-This repo is a GitHub Template. Fork it, then configure your instance by
-following the steps below. Your instance values (credentials, usernames,
-device names) stay local — they are gitignored.
+This repo can be forked or cloned for a course, lab, or single robot station.
+Instance-specific values stay local in `.env`, `config/fleet.yaml`, Ansible
+vault files, OpenRC files, and generated inventory. Those files are gitignored.
+
+For the current runbook after setup, use
+[docs/lerobot-training-session.md](docs/lerobot-training-session.md).
 
 ## Prerequisites
 
-- Chameleon Cloud account with an active allocation
-- HuggingFace account
-- balena.io account (free)
-- Node.js 18+ and Python 3.10+ on your workstation
+- Chameleon Cloud account with access to the target project.
+- Hugging Face account with a write-scoped token.
+- Tailscale tailnet and a reusable+ephemeral auth key for fleet nodes.
+- Python 3.12 and `uv` on the control node.
+- `just`, `ansible`, `ssh`, `scp`, and `git`.
+- Balena CLI only if enrolling or repairing a physical CHI@Edge Pi host.
 
-## Step 1: Install CLIs
+## 1. Clone and Bootstrap
 
 ```bash
-npm install -g balena-cli
-pip install python-chi-edge --break-system-packages
-ansible-galaxy collection install community.general  # if running playbooks
+git clone https://github.com/ricklon/coachable-robots.git
+cd coachable-robots
 ```
 
-## Step 2: Configure Ansible vars
+Create local config from templates:
 
 ```bash
+cp .env.example .env
+cp config/fleet.example.yaml config/fleet.yaml
 cp ansible/group_vars/all/vars.example.yml ansible/group_vars/all/vars.yml
-```
-
-Edit `ansible/group_vars/all/vars.yml` and set:
-
-| Variable | Value |
-|----------|-------|
-| `hf_user` | Your HuggingFace username |
-
-## Step 3: Configure secrets (Ansible Vault)
-
-Create a vault password file (never commit this):
-
-```bash
-echo 'your-strong-password' > ansible/.vault_pass
-chmod 600 ansible/.vault_pass
-```
-
-Copy and fill in the vault template:
-
-```bash
 cp ansible/group_vars/all/vault.example.yml ansible/group_vars/all/vault.yml
 ```
 
-Edit `ansible/group_vars/all/vault.yml` and set:
+## 2. Configure Secrets
 
-| Variable | Where to get it |
-|----------|----------------|
-| `vault_hf_token` | https://huggingface.co/settings/tokens |
-| `vault_chi_credential_id` | CHI@Edge portal → Identity → Application Credentials |
-| `vault_chi_credential_secret` | Same — saved when you created the credential |
+Create the vault password file:
 
-Encrypt the vault (required before use):
+```bash
+echo 'your-vault-password' > ansible/.vault_pass
+chmod 600 ansible/.vault_pass
+```
+
+Fill `ansible/group_vars/all/vault.yml` with:
+
+| Variable | Purpose |
+|----------|---------|
+| `vault_hf_token` | Hugging Face dataset/model upload token |
+| `vault_ts_authkey` | Tailscale auth key for control, arm, and training nodes |
+| `vault_chi_tacc_credential_id` | CHI@TACC application credential for MI100 |
+| `vault_chi_tacc_credential_secret` | CHI@TACC application credential secret |
+| `vault_openrouter_api_key` | Optional talkbot cloud LLM key |
+
+Legacy `vault_chi_credential_id` and `vault_chi_credential_secret` are still
+accepted as fallbacks, but new setups should use the site-specific names above.
+
+Encrypt the vault:
 
 ```bash
 ansible-vault encrypt ansible/group_vars/all/vault.yml
 ```
 
-Verify:
+Then generate `.env` and SSH material:
 
 ```bash
-head -1 ansible/group_vars/all/vault.yml
-# → $ANSIBLE_VAULT;1.1;AES256
+just vault-to-env
+just check-env
+just check-auth-json
 ```
 
-Once encrypted, `vault.yml` is safe to commit to your private fork.
+## 3. Configure Chameleon Sites
 
-## Step 4: Configure the notebook
+Use separate credentials for separate sites:
 
-Open `CoachableRobots_v3.ipynb` and update the cells marked `# CONFIGURE:`:
+| Site | Use |
+|------|-----|
+| CHI@TACC | MI100 bare-metal training leases |
+| CHI@Edge | SO-ARM101 Pi and Jetson device leases/containers |
+| KVM@TACC | Optional control node |
 
-| Cell | Variable | Set to |
-|------|----------|--------|
-| Cell 1 (Setup) | `project_name` | Your Chameleon allocation, e.g. `CHI-261589` |
-| Cell 1 (Setup) | `KEY_NAME` | Your Nova key pair name |
-| Cell 17 (Training) | `HF_USER` | Your HuggingFace username |
+OpenRC files belong under `ansible/` and are gitignored:
 
-## Step 5: Enroll your Pi on CHI@Edge
+```text
+ansible/app-cred-chi-edge-openrc.sh
+ansible/app-cred-coachable-chi-edge-openrc-unrestricted.sh
+ansible/app-cred-kvm-tacc-openrc.sh
+```
 
-Follow [docs/pi5-chi-edge-setup.md](docs/pi5-chi-edge-setup.md) to:
+For CHI@Edge lease creation, unrestricted application credentials may be needed
+because Blazar can create Keystone trusts during device lease workflows.
 
-1. Register your device with `chi-edge device register`
-2. Download BalenaOS with `balena os download`
-3. Bake the image with `chi-edge device bake`
-4. Flash with `balena local flash`
+## 4. Configure the Fleet
 
-## Step 6: Set Up Chameleon JupyterHub
+Edit `config/fleet.yaml` for the physical lab:
 
-JupyterHub at **https://jupyter.chameleoncloud.org** is where you run the
-orchestration notebook. It takes 3-5 minutes to spin up on first load.
+- arm IDs such as `arm-01`;
+- CHI@Edge device names such as `soarm101-1`;
+- leader and follower serial ports;
+- camera indexes;
+- CHI@Edge image and device profiles.
 
-Once it's running, open a terminal and:
+The working SO-ARM101 CHI@Edge device profiles are:
+
+```yaml
+device_profiles:
+  - ttyacm0
+  - ttyacm1
+  - video0
+  - video1
+  - video2
+  - video3
+```
+
+Leave `.env` overrides such as `EDGE_DEVICE_NAME`, `EDGE_IMAGE_REF`, and
+`EDGE_DEVICE_PROFILES` blank unless you are deliberately testing a temporary
+override. Normal defaults come from `config/fleet.yaml`.
+
+## 5. Enroll or Repair a Pi on CHI@Edge
+
+For first-time Pi enrollment, follow
+[docs/pi5-chi-edge-setup.md](docs/pi5-chi-edge-setup.md).
+
+After enrollment, the operator path is:
 
 ```bash
-# Clone the repo into your persistent /work directory
-cd /work
-git clone https://github.com/YOUR_GITHUB_USERNAME/coachable-robots.git
-cd coachable-robots
+just edge-device-show
+just reserve-edge-lease
+just reserve-edge
+just edge-status
+just arm-test
 ```
 
-Recreate the gitignored instance files (vault.yml comes with the clone
-since it's encrypted and committed):
+Access the arm over Tailscale:
 
 ```bash
-# Vault password — same password you used locally
-echo 'your-vault-password' > ansible/.vault_pass
-chmod 600 ansible/.vault_pass
-
-# vars.yml
-cp ansible/group_vars/all/vars.example.yml ansible/group_vars/all/vars.yml
-vim ansible/group_vars/all/vars.yml   # set hf_user
+ssh root@arm-01
 ```
 
-Set your CHI@Edge credentials in the environment. Either source the RC file
-if you've uploaded it, or export directly:
+Avoid running Balena preview and CHI@Edge robot workloads at the same time.
+They share the same cameras and serial ports.
+
+## 6. Preserve Calibration
+
+The same physical leader and follower arms are reused across sessions. Back up
+calibration immediately after a known-good calibration or before training:
 
 ```bash
-export OS_AUTH_TYPE=v3applicationcredential
-export OS_AUTH_URL=https://chi.edge.chameleoncloud.org:5000/v3
-export OS_IDENTITY_API_VERSION=3
-export OS_REGION_NAME="CHI@Edge"
-export OS_APPLICATION_CREDENTIAL_ID=YOUR_CREDENTIAL_ID
-export OS_APPLICATION_CREDENTIAL_SECRET=YOUR_CREDENTIAL_SECRET
+just arm-calibration-backup label=alpha-current
+just arm-calibration-backups
 ```
 
-The SSH key for accessing bare-metal training nodes lives at `/work/.ssh/id_rsa`
-on JupyterHub — generate it if it doesn't exist:
+Backups stay local under `calibration-backups/` and are gitignored. Restore only
+when the same physical arms and motor IDs are attached:
 
 ```bash
-ls /work/.ssh/id_rsa || ssh-keygen -t ed25519 -f /work/.ssh/id_rsa -N ""
+just arm-calibration-restore archive=calibration-backups/<backup>.tgz
 ```
 
-Register it with Nova before launching your first training server:
+## 7. Prepare MI100 Training
 
-```python
-from chi import clients
-nova = clients.nova()
-with open("/work/.ssh/id_rsa.pub") as f:
-    nova.keypairs.create(name="YOUR_KEY_NAME", public_key=f.read())
+Reserve and provision an MI100 training node:
+
+```bash
+just reserve
+just provision
+just test-node
 ```
 
-Then open `CoachableRobots_v3.ipynb` and update the `# CONFIGURE:` cells.
+Confirm the node is really an MI100 before training:
 
-## Step 7: Run the pipeline
-
-The pipeline uses two notebooks with distinct roles:
-
-| Notebook | Purpose | Run when |
-|----------|---------|----------|
-| `CoachableRobots_v3.ipynb` | Provision MI100 cloud node + train | Once per training session |
-| `Request_LeRobot_SOARM101.ipynb` | Lease Pi, launch container, collect demos | Each work session |
-
----
-
-### CoachableRobots_v3.ipynb — Cloud Training Setup
-
-Open on **Chameleon JupyterHub** and run cells top to bottom.
-
-**Part 1 — Lease and Server** (~5 min, or instant if reusing)
-- Checks for an existing `coachable-robots-mi100` lease and reuses it
-- Lists available MI100 nodes before creating anything
-- Prompts for confirmation before creating a new lease
-- Expected output: `REUSING lease ...` or `Lease ACTIVE: <id>`
-
-**Part 2 — Ansible Provisioning** (~20 min first run, ~2 min on re-runs)
-- Generates `ansible/inventory.ini` from the floating IP
-- Runs `setup_training_node.yml` — installs ROCm 6.3, Miniconda, PyTorch, LeRobot
-- Idempotent: skips steps already completed
-- Expected output: `Playbook completed successfully`
-
-**Part 4 — Training** (after demos are collected and pushed to HF Hub)
-- Set `HF_USER` and `DATASET` at the top of the cell
-- Launches `lerobot-train` on the MI100 via SSH
-- Expected output: training loss logs (runs in foreground; use tmux for long runs)
-
-**Part 6 — Cleanup** (when done)
-- Type `yes` at the prompt to delete server and release the lease
-- Expected output: `Cleanup complete.`
-
----
-
-### Request_LeRobot_SOARM101.ipynb — Edge Device
-
-Open on **Chameleon JupyterHub** and run cells top to bottom each session.
-
-**Setup cell**
-- Sets site to `CHI@Edge` and project to `CHI-261589`
-- No output expected; errors here mean auth is not configured
-
-**Lease cell**
-- Reuses `lerobot-soarm101-lease` if active, creates a 7-day lease if not
-- Expected output: `Reusing lease ... ACTIVE` or `Lease ACTIVE`
-
-**Container cell**
-- Deletes any stale/errored container automatically, then creates fresh
-- Pulls `rianders/lerobot-soarm101:latest` from Docker Hub (~1-2 min)
-- Uses `pi_camera` device profile for webcam access
-- Expected output: `Container 'lerobot-soarm101-container' is Running`
-
-**Floating IP cell**
-- Assigns a public IP if not already attached
-- Expected output: `Public IP: <ip>` and SSH command
-
-**Verify cells**
-- `ls /dev/video*` — should show `/dev/video0` (C920e webcam)
-- `v4l2-ctl --info` — shows camera capabilities
-- **Camera capture cell** — takes a test frame and displays it inline in the notebook
-  - Expected output: a 1280×720 image from the C920e
-  - If this fails: check the Pi is powered, camera is plugged in, `pi_camera` profile is set
-
-**Data collection**
-- Both serial ports exposed via `device_profiles=["ttyacm0", "ttyacm1", "pi_camera"]`
-- Helpdesk confirmed: pass each port as a lowercase list entry (not a custom named profile)
-
-**Cleanup cell** (optional — lease persists 7 days)
-- Prompts for confirmation before deleting the container
-- Lease is not deleted automatically; uncomment `my_lease.delete()` to release early
-
----
-
-See [README.md](README.md) for the full architecture and data flow.
-
-## What is gitignored (instance files)
-
+```bash
+ssh cc@train-mi100 'lspci -nn | egrep -i "AMD|Instinct|MI100|1002"; rocm-smi'
 ```
+
+If this does not show AMD/MI100 hardware, create a fresh `gpu_mi100` lease
+instead of training on a generic bare-metal host.
+
+## 8. Run a Training Session
+
+Use the current runbook:
+
+```bash
+less docs/lerobot-training-session.md
+```
+
+Recommended first task:
+
+```text
+touch_object_v1
+```
+
+Recommended first policy:
+
+```text
+ACT
+```
+
+MI100 is gfx908 hardware. ACT is the safest first policy because it avoids
+Flash Attention 2 requirements.
+
+## Gitignored Instance Files
+
+Do not commit local credentials, generated state, or hardware backups:
+
+```text
+.env
+.codex
+.node_ip
 ansible/.vault_pass
+ansible/inventory.ini
+ansible/*-openrc.sh
+ansible/*-openrc-*.sh
 ansible/group_vars/all/vars.yml
-ansible/group_vars/all/vault.yml   # until encrypted; safe to commit once encrypted
-ansible/inventory.ini              # auto-generated by the notebook
+ansible/group_vars/all/vault.yml
+config/fleet.yaml
+calibration-backups/
+bench/results/*
 ```
 
-Never commit plaintext `vault.yml` or any file containing real tokens/credentials.
+Generated notebook outputs in `bench/results/` are artifacts, not source. Keep
+only `bench/results/.gitkeep` tracked.

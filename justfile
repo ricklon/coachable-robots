@@ -86,7 +86,7 @@ check-auth-json: check-env
 reserve: check-chameleon
     uv run python scripts/reserve.py
 
-# Reserve CHI@Edge SO-ARM101 device, launch LeRobot container, assign floating IP
+# Reserve CHI@Edge SO-ARM101 device and launch the Tailscale-enabled arm container
 reserve-edge:
     uv run python scripts/reserve_edge.py
 

@@ -310,7 +310,7 @@ data collection since NVME write throughput far exceeds microSD.
 Mount the NVME inside containers by adding a volume in your notebook:
 
 ```python
-# In Request_LeRobot_SOARM101.ipynb
+# Direct python-chi container launch example
 my_container = Container(
     ...
     mounts=["/mnt/nvme:/data"],
@@ -375,7 +375,7 @@ the fleet entry.
 ```python
 my_container = Container(
     "soarm101-lerobot",
-    image_ref="rianders/lerobot-soarm101:latest",
+    image_ref="rianders/lerobot-soarm101:arm",
     reservation_id=reservation_id,
     environment={
         "HF_TOKEN": "hf_xxx",
@@ -441,11 +441,13 @@ python -c "import torch; print(torch.cuda.is_available())"  # True on ROCm
 
 Once the device is enrolled and healthy:
 
-1. Open `Request_LeRobot_SOARM101.ipynb` on Chameleon JupyterHub
-2. Set `DEVICE_NAME = "soarm101-1"`
-3. Run through the notebook to lease the device, launch the LeRobot
-   container, and collect demonstration episodes
+1. Run `just edge-device-show` to verify CHI@Edge can see the device.
+2. Run `just reserve-edge-lease` or set `EDGE_LEASE_ID` from a portal-created lease.
+3. Run `just reserve-edge` to launch the LeRobot container.
+4. Run `just arm-test` to verify SSH, Tailscale, serial ports, cameras, and calibration.
+5. Follow [lerobot-training-session.md](lerobot-training-session.md) for the current
+   collection and training workflow.
 
 > **Note:** CHI@Edge maximum lease duration is **7 days**. Renew before
 > expiry to avoid losing access to the device mid-experiment.
-4. See [README.md](../README.md) for the full edge-to-cloud pipeline
+See [README.md](../README.md) for the full edge-to-cloud pipeline.
