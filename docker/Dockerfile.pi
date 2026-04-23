@@ -1,6 +1,6 @@
-# DEPRECATED — use channels/chi-edge/Dockerfile instead
+# DEPRECATED — use channels/arm/Dockerfile instead
 # This file is kept for reference during the transition to the channels/ structure.
-# Build via: make build-chi-edge
+# Build current CHI@Edge arm image via: just build-arm
 #
 # Dockerfile.pi — Raspberry Pi 5 edge collector for SO-ARM101
 #

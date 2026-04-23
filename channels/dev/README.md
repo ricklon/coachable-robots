@@ -9,7 +9,9 @@ Adds simulation environments (`gym-pusht`, `gym-aloha`) to the base stack.
 ## Build
 
 ```bash
-make build-dev
+docker buildx build --platform linux/amd64 --load \
+  -t rianders/lerobot-soarm101:dev \
+  -f channels/dev/Dockerfile .
 ```
 
 ## Usage

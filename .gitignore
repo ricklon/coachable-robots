@@ -77,6 +77,8 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+bench/results/*
+!bench/results/.gitkeep
 
 # IPython
 profile_default/
@@ -190,9 +192,14 @@ cython_debug/
 
 # Ansible — instance files (gitignored; use .example versions as templates)
 ansible/.vault_pass
+ansible/inventory.ini
 ansible/*-openrc.sh
 ansible/group_vars/all/vars.yml
 ansible/group_vars/all/vault.yml
+
+# Local infrastructure state
+.codex
+.node_ip
 
 # Fleet config — contains real station assignments and coach names
 config/fleet.yaml
