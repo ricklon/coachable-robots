@@ -352,7 +352,7 @@ chi-edge device sync soarm101-1
 ```
 **Cause:** Both `pi_camera` and `pi_libcamera` map to the Pi Camera Module CSI pipeline (`vchiq`, `vcsm-cma`, `video10`–`video18`). Neither exposes USB UVC cameras (`/dev/video0`, `/dev/video2`). The helpdesk suggestion to use `pi_libcamera` for Pi 5 USB cameras did not work.
 
-**What's actually needed:** `video0` and `video2` must be registered as named device profiles in the CHI@Edge smarter-device-manager config — exactly as `ttyacm0`/`ttyacm1` were added previously. This requires a helpdesk ticket.
+**What's actually needed:** `video0` through `video3` must be registered as named device profiles in the CHI@Edge smarter-device-manager config — exactly as `ttyacm0`/`ttyacm1` were added previously. This includes the metadata/control nodes that appear beside the capture nodes.
 
 **Device mapping on this Pi (verified with v4l2-ctl):**
 | Device | Camera | Role |
@@ -362,7 +362,7 @@ chi-edge device sync soarm101-1
 | `/dev/video2` | HD USB Camera (gripper) | capture ← what we need |
 | `/dev/video3` | HD USB Camera (gripper) | metadata/control node |
 
-**Helpdesk status:** All four profiles enabled and confirmed working ✅
+**Helpdesk status:** All four video profiles enabled and confirmed working ✅
 
 **Working container profiles:**
 ```python

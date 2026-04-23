@@ -340,10 +340,10 @@ granted exclusively via device profiles — there is no `--privileged` or
 | `ttyacm1` | `/dev/ttyACM1` | ✅ added by helpdesk |
 | `video0` | `/dev/video0` (C920 capture) | ✅ added by helpdesk |
 | `video1` | `/dev/video1` (C920 metadata/ctrl) | ✅ added by helpdesk |
-| `video2` | `/dev/video2` (gripper capture) | ✅ added by helpdesk |
-| `video3` | `/dev/video3` (gripper metadata/ctrl) | ✅ added by helpdesk |
+| `video2` | `/dev/video2` (second camera capture) | ✅ added by helpdesk |
+| `video3` | `/dev/video3` (second camera metadata/ctrl) | ✅ added by helpdesk |
 
-> **Pi 5 + USB cameras:** `pi_camera` requires `vchiq`, `vcsm-cma`, and `video10-18` — VideoCore/CSI devices that don't exist on Pi 5. Use individual `video0`–`video3` profile names (same pattern as `ttyacm0`/`ttyacm1`). All four mappings confirmed working via helpdesk.
+> **Pi 5 + USB cameras:** `pi_camera` requires `vchiq`, `vcsm-cma`, and `video10-18` — VideoCore/CSI devices that don't exist on Pi 5. For two USB cameras on arm-01, request `video0`/`video2` for capture and `video1`/`video3` for their metadata/control nodes.
 
 ### SO-ARM101 Two-Arm Constraint
 
@@ -353,7 +353,7 @@ requires **two serial ports** — leader on `ttyACM0`, follower on `ttyACM1`.
 **Resolved:** Pass each port as a separate lowercase entry in `device_profiles`:
 
 ```python
-device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"]
+device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"]
 ```
 
 Both `/dev/ttyACM0` and `/dev/ttyACM1` will be exposed in the container.
@@ -365,6 +365,12 @@ Use `"video0"` and `"video1"` in `device_profiles` (not `pi_camera`).
 Both mappings are confirmed working — no additional helpdesk action needed.
 
 ### Container launch (python-chi)
+
+The expected CHI@Edge device profiles live in `config/fleet.yaml` under the
+selected arm's `chi_edge.device_profiles`. `.env` selects the arm with
+`EDGE_ARM_ID` and may temporarily override `EDGE_DEVICE_PROFILES`, but the
+normal path is to leave that override blank and let `just restart-arm` read
+the fleet entry.
 
 ```python
 my_container = Container(
@@ -378,7 +384,7 @@ my_container = Container(
         "FOLLOWER_PORT": "/dev/ttyACM1",
         "CAMERA_INDEX": "0",
     },
-    device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"],
+    device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"],
 )
 ```
 

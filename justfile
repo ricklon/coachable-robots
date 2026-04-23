@@ -141,6 +141,10 @@ release-jetson:
 edge-device-show:
     bash -lc 'source "${EDGE_RC_FILE:-ansible/app-cred-chi-edge-openrc.sh}" && unset OS_PROJECT_ID OS_PROJECT_NAME OS_PROJECT_DOMAIN_ID OS_PROJECT_DOMAIN_NAME && uv run chi-edge device show "${EDGE_DEVICE_NAME:-soarm101-1}"'
 
+# List registered CHI@Edge devices visible to these credentials as redacted JSON
+edge-device-list:
+    uv run python scripts/reserve_edge.py --devices
+
 # Show current lease + server state as JSON (exits 2 if not SSH-ready)
 node-status:
     uv run python scripts/reserve.py --status
@@ -155,9 +159,13 @@ release:
 
 # Run Ansible provisioning (ROCm + LeRobot) against current inventory
 provision: check-env
+    ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
+    ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+    ANSIBLE_SSH_CONTROL_PATH_DIR=/tmp/ansible-cp \
     ansible-playbook \
         -i ansible/inventory.ini \
-        ansible/playbooks/setup_training_node.yml
+        ansible/playbooks/setup_training_node.yml \
+        --vault-password-file ansible/.vault_pass
 
 # Provision the KVM control node
 provision-control: check-env
@@ -257,7 +265,7 @@ arm-test: check-env
         "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
     @echo "=== Cameras ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
-        "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
+        "ls /dev/video* 2>/dev/null || echo 'cameras NOT FOUND'"
     @echo "=== Calibration ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"

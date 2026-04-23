@@ -114,8 +114,17 @@ def wait_for_ssh(ip: str, timeout: int = 900, interval: int = 15) -> bool:
     return False
 
 
+def default_private_key() -> str:
+    """Return a usable SSH key path for generated Ansible inventory."""
+    for key in ("id_rsa", "id_ed25519", "pi_id_rsa"):
+        path = Path.home() / ".ssh" / key
+        if path.exists():
+            return str(path)
+    return os.path.expanduser("~/.ssh/id_rsa")
+
+
 def write_inventory(floating_ip: str) -> None:
-    private_key = os.path.expanduser("~/.ssh/id_rsa")
+    private_key = default_private_key()
     inventory_path = REPO_ROOT / "ansible" / "inventory.ini"
     inventory_path.write_text(
         f"[training]\n"
@@ -177,9 +186,10 @@ def reserve():
     if my_lease:
         print(f"  Reusing [{my_lease.status}] {my_lease.name}  ends: {my_lease.end_date}")
     else:
-        available = hardware.get_nodes(node_type=NODE_TYPE, filter_reserved=True)
-        if not available:
-            sys.exit(f"ERROR: No {NODE_TYPE} nodes available — check the host calendar")
+        all_nodes = hardware.get_nodes(node_type=NODE_TYPE)
+        if not all_nodes:
+            sys.exit(f"ERROR: No {NODE_TYPE} nodes found in this site")
+        print(f"  Found {len(all_nodes)} {NODE_TYPE} node(s) at this site")
 
         print(f"  Creating {LEASE_HOURS}h lease for 1x {NODE_TYPE}...")
         my_lease = Lease(name=LEASE_NAME, duration=timedelta(hours=LEASE_HOURS))

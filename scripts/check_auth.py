@@ -90,11 +90,12 @@ def check_env_completeness() -> dict:
         "HF_USER", "HF_TOKEN",
         "CHI_CREDENTIAL_ID", "CHI_CREDENTIAL_SECRET",
         "OS_AUTH_TYPE", "OS_APPLICATION_CREDENTIAL_ID",
-        "OS_APPLICATION_CREDENTIAL_SECRET", "OS_PROJECT_NAME",
-        "OS_PROJECT_DOMAIN_NAME",
+        "OS_APPLICATION_CREDENTIAL_SECRET",
         "LEASE_NAME", "KEY_PAIR_NAME",
         "PI_HOST", "PI_PORT",
     ]
+    if os.getenv("OS_AUTH_TYPE") != "v3applicationcredential":
+        required.extend(["OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_NAME"])
     placeholders = ("REPLACE_ME", "your_hf_username", "your_keypair_name", "CHI-XXXXXX")
     missing      = []
     placeholder  = []
