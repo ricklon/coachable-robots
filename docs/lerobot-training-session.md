@@ -132,14 +132,14 @@ Recommended first collection:
 - Slow, smooth movements.
 - Same object and same workspace location.
 
-Current warning: `just arm-collect` uses stock `lerobot-record`. The wrist-safe
-teleop wrapper has been validated, but a wrist-safe recording wrapper should be
-added before collecting gripper-heavy or wrist-sensitive datasets.
+Use the wrist-safe recorder for real arm datasets. It uses LeRobot's dataset
+writer and episode timing, but clamps follower wrist roll the same way as
+`just arm-teleop-safe`.
 
 Current collection entrypoint:
 
 ```bash
-just arm-collect touch_object_v1 20
+just arm-record-safe touch_object_v1 20 "Touch the red block on the table"
 ```
 
 ## 6. Replay Before Training

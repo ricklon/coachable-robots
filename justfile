@@ -302,6 +302,24 @@ arm-collect dataset episodes="20": check-env
            --dataset.num_episodes={{episodes}} \
            --dataset.push_to_hub=true"
 
+# Record demonstration episodes with follower wrist-roll clamped around the
+# current matched start pose. Put both wrists in a cable-safe matching pose first.
+arm-record-safe dataset episodes="20" task="Touch the red block on the table" fps="30" wrist_degrees="15": check-env
+    scp scripts/safe_so101_record.py root@{{_arm_host}}:/tmp/safe_so101_record.py
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "python /tmp/safe_so101_record.py \
+           --repo-id ${HF_USER}/{{dataset}} \
+           --task '{{task}}' \
+           --num-episodes {{episodes}} \
+           --fps {{fps}} \
+           --wrist-safe-degrees {{wrist_degrees}} \
+           --leader-port /dev/ttyACM0 \
+           --follower-port /dev/ttyACM1 \
+           --leader-id alpha_leader \
+           --follower-id alpha_follower \
+           --calibration-dir /app/calibration \
+           --dataset-root /app/data"
+
 # Calibrate the arm: just arm-calibrate
 arm-calibrate: check-env
     ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
