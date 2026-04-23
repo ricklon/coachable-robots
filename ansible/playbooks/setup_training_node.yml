@@ -14,6 +14,7 @@
   vars:
     rocm_version: "6.3"
     rocm_pkg_version: "6.3.4"
+    amdgpu_install_pkg_version: "6.3.60304"
     pytorch_version: "2.7.1"
     lerobot_version: "v0.5.0"
     conda_home: "/home/cc/miniconda3"
@@ -57,7 +58,7 @@
 
     - name: Download amdgpu-install package
       get_url:
-        url: "https://repo.radeon.com/amdgpu-install/{{ rocm_pkg_version }}/ubuntu/jammy/amdgpu-install_{{ rocm_pkg_version | regex_replace('\\.', '') }}-1_all.deb"
+        url: "https://repo.radeon.com/amdgpu-install/{{ rocm_pkg_version }}/ubuntu/jammy/amdgpu-install_{{ amdgpu_install_pkg_version }}-1_all.deb"
         dest: /tmp/amdgpu-install.deb
       when: rocm_check.rc != 0
 
@@ -69,11 +70,15 @@
     - name: Install ROCm
       command: amdgpu-install -y --usecase=rocm --no-dkms
       when: rocm_check.rc != 0
+      notify: Reboot for ROCm
 
     - name: Clean up installer
       file:
         path: /tmp/amdgpu-install.deb
         state: absent
+
+    - name: Reboot immediately after first ROCm install
+      meta: flush_handlers
 
     # ── Verify GPU ──
     - name: Verify MI100 is detected

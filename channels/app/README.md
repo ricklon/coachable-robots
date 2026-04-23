@@ -12,7 +12,9 @@ Build this first; `chi-edge` and `balena` channels build `FROM` it.
 ## Build
 
 ```bash
-make build-app
+docker buildx build --platform linux/arm64 --load \
+  -t rianders/lerobot-soarm101:app \
+  -f channels/app/Dockerfile .
 ```
 
 ## What's the same across all Pi channels

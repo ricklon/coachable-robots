@@ -33,11 +33,17 @@ FLEET_EXAMPLE = REPO_ROOT / "config" / "fleet.example.yaml"
 # Maps vault variable names → .env key names
 VAULT_MAP = {
     "vault_hf_token":              "HF_TOKEN",
-    "vault_chi_credential_id":     "CHI_CREDENTIAL_ID",
-    "vault_chi_credential_secret": "CHI_CREDENTIAL_SECRET",
+    # Prefer explicit CHI@TACC credentials for the default Chameleon operator path.
+    # The legacy vault_chi_credential_* names are still supported below as fallback.
+    "vault_chi_tacc_credential_id":     "CHI_CREDENTIAL_ID",
+    "vault_chi_tacc_credential_secret": "CHI_CREDENTIAL_SECRET",
     "vault_control_floating_ip":   "CONTROL_FLOATING_IP",
     "vault_ts_authkey":            "TS_AUTHKEY",
     "vault_openrouter_api_key":    "OPENROUTER_API_KEY",
+}
+VAULT_FALLBACK_MAP = {
+    "vault_chi_credential_id":     "CHI_CREDENTIAL_ID",
+    "vault_chi_credential_secret": "CHI_CREDENTIAL_SECRET",
 }
 
 # SSH key material goes to files, not .env
@@ -151,6 +157,12 @@ def build_env(vault: dict, dry_run: bool = False) -> None:
     vault_applied = []
     for vault_key, env_key in VAULT_MAP.items():
         if vault_key in vault:
+            val = vault[vault_key]
+            if val and val != "REPLACE_ME":
+                merged[env_key] = val
+                vault_applied.append(env_key)
+    for vault_key, env_key in VAULT_FALLBACK_MAP.items():
+        if env_key not in vault_applied and vault_key in vault:
             val = vault[vault_key]
             if val and val != "REPLACE_ME":
                 merged[env_key] = val

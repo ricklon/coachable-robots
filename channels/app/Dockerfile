@@ -5,12 +5,9 @@
 # Does NOT include openssh-server — that is a channel concern, not an app concern.
 #
 # Channels that build FROM this image:
-#   channels/chi-edge/Dockerfile  — adds sshd for CHI@Edge floating IP access
+#   channels/arm/Dockerfile       — adds sshd and Tailscale for CHI@Edge
 #   channels/balena/Dockerfile    — adds balena supervisor label
 #   channels/local/docker-compose.yml — runs this image directly with --privileged
-#
-# Build (via Makefile):
-#   make build-app
 #
 # Direct build:
 #   docker buildx build --platform linux/arm64 --load \

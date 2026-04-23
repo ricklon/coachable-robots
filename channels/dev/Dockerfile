@@ -5,10 +5,8 @@
 # pipeline without physical hardware.
 #
 # Build:
-#   make build-dev
-#
-# Direct build:
-#   docker build -t rianders/lerobot-soarm101:dev -f channels/dev/Dockerfile .
+#   docker buildx build --platform linux/amd64 --load \
+#     -t rianders/lerobot-soarm101:dev -f channels/dev/Dockerfile .
 #
 # Run (simulation, no hardware):
 #   docker run -it -e USE_SIM=1 -e HF_TOKEN=hf_xxx -e HF_USER=yourname \

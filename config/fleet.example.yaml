@@ -30,7 +30,17 @@ fleet:
       follower_port: /dev/ttyACM1     # SO-ARM101 follower
       cameras:
         top: 0                        # Logitech C920e — /dev/video0
-        gripper: 2                    # SVPRO OV2710 fisheye — /dev/video2
+        gripper: 2                    # second USB camera capture — /dev/video2
+      chi_edge:
+        container_name: arm-01-container
+        image_ref: rianders/lerobot-soarm101:chi-edge
+        device_profiles:              # CHI@Edge scheduler profiles requested at Zun create time
+          - ttyacm0                    # /dev/ttyACM0
+          - ttyacm1                    # /dev/ttyACM1
+          - video0                     # /dev/video0 camera 1 capture
+          - video1                     # /dev/video1 camera 1 metadata/control
+          - video2                     # /dev/video2 camera 2 capture
+          - video3                     # /dev/video3 camera 2 metadata/control
       coach: null                     # assigned coach name (from coaches list)
       status: available               # available | in_use | offline
 

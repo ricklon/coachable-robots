@@ -310,7 +310,7 @@ data collection since NVME write throughput far exceeds microSD.
 Mount the NVME inside containers by adding a volume in your notebook:
 
 ```python
-# In Request_LeRobot_SOARM101.ipynb
+# Direct python-chi container launch example
 my_container = Container(
     ...
     mounts=["/mnt/nvme:/data"],
@@ -340,10 +340,10 @@ granted exclusively via device profiles — there is no `--privileged` or
 | `ttyacm1` | `/dev/ttyACM1` | ✅ added by helpdesk |
 | `video0` | `/dev/video0` (C920 capture) | ✅ added by helpdesk |
 | `video1` | `/dev/video1` (C920 metadata/ctrl) | ✅ added by helpdesk |
-| `video2` | `/dev/video2` (gripper capture) | ✅ added by helpdesk |
-| `video3` | `/dev/video3` (gripper metadata/ctrl) | ✅ added by helpdesk |
+| `video2` | `/dev/video2` (second camera capture) | ✅ added by helpdesk |
+| `video3` | `/dev/video3` (second camera metadata/ctrl) | ✅ added by helpdesk |
 
-> **Pi 5 + USB cameras:** `pi_camera` requires `vchiq`, `vcsm-cma`, and `video10-18` — VideoCore/CSI devices that don't exist on Pi 5. Use individual `video0`–`video3` profile names (same pattern as `ttyacm0`/`ttyacm1`). All four mappings confirmed working via helpdesk.
+> **Pi 5 + USB cameras:** `pi_camera` requires `vchiq`, `vcsm-cma`, and `video10-18` — VideoCore/CSI devices that don't exist on Pi 5. For two USB cameras on arm-01, request `video0`/`video2` for capture and `video1`/`video3` for their metadata/control nodes.
 
 ### SO-ARM101 Two-Arm Constraint
 
@@ -353,7 +353,7 @@ requires **two serial ports** — leader on `ttyACM0`, follower on `ttyACM1`.
 **Resolved:** Pass each port as a separate lowercase entry in `device_profiles`:
 
 ```python
-device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"]
+device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"]
 ```
 
 Both `/dev/ttyACM0` and `/dev/ttyACM1` will be exposed in the container.
@@ -366,10 +366,16 @@ Both mappings are confirmed working — no additional helpdesk action needed.
 
 ### Container launch (python-chi)
 
+The expected CHI@Edge device profiles live in `config/fleet.yaml` under the
+selected arm's `chi_edge.device_profiles`. `.env` selects the arm with
+`EDGE_ARM_ID` and may temporarily override `EDGE_DEVICE_PROFILES`, but the
+normal path is to leave that override blank and let `just restart-arm` read
+the fleet entry.
+
 ```python
 my_container = Container(
     "soarm101-lerobot",
-    image_ref="rianders/lerobot-soarm101:latest",
+    image_ref="rianders/lerobot-soarm101:arm",
     reservation_id=reservation_id,
     environment={
         "HF_TOKEN": "hf_xxx",
@@ -378,7 +384,7 @@ my_container = Container(
         "FOLLOWER_PORT": "/dev/ttyACM1",
         "CAMERA_INDEX": "0",
     },
-    device_profiles=["ttyacm0", "ttyacm1", "video0", "video1"],
+    device_profiles=["ttyacm0", "ttyacm1", "video0", "video1", "video2", "video3"],
 )
 ```
 
@@ -435,11 +441,13 @@ python -c "import torch; print(torch.cuda.is_available())"  # True on ROCm
 
 Once the device is enrolled and healthy:
 
-1. Open `Request_LeRobot_SOARM101.ipynb` on Chameleon JupyterHub
-2. Set `DEVICE_NAME = "soarm101-1"`
-3. Run through the notebook to lease the device, launch the LeRobot
-   container, and collect demonstration episodes
+1. Run `just edge-device-show` to verify CHI@Edge can see the device.
+2. Run `just reserve-edge-lease` or set `EDGE_LEASE_ID` from a portal-created lease.
+3. Run `just reserve-edge` to launch the LeRobot container.
+4. Run `just arm-test` to verify SSH, Tailscale, serial ports, cameras, and calibration.
+5. Follow [lerobot-training-session.md](lerobot-training-session.md) for the current
+   collection and training workflow.
 
 > **Note:** CHI@Edge maximum lease duration is **7 days**. Renew before
 > expiry to avoid losing access to the device mid-experiment.
-4. See [README.md](../README.md) for the full edge-to-cloud pipeline
+See [README.md](../README.md) for the full edge-to-cloud pipeline.

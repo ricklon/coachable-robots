@@ -24,12 +24,13 @@ def main() -> None:
         "HF_TOKEN",
         "CHI_CREDENTIAL_ID",
         "CHI_CREDENTIAL_SECRET",
-        "OS_PROJECT_NAME",
         "LEASE_NAME",
         "KEY_PAIR_NAME",
         "PI_HOST",
         "PI_PORT",
     }
+    if os.environ.get("OS_AUTH_TYPE") != "v3applicationcredential":
+        required.add("OS_PROJECT_NAME")
     placeholders = ("REPLACE_ME", "your_hf_username", "your_keypair_name", "CHI-XXXXXX")
     bad = [
         key

@@ -86,7 +86,7 @@ check-auth-json: check-env
 reserve: check-chameleon
     uv run python scripts/reserve.py
 
-# Reserve CHI@Edge SO-ARM101 device, launch LeRobot container, assign floating IP
+# Reserve CHI@Edge SO-ARM101 device and launch the Tailscale-enabled arm container
 reserve-edge:
     uv run python scripts/reserve_edge.py
 
@@ -141,6 +141,10 @@ release-jetson:
 edge-device-show:
     bash -lc 'source "${EDGE_RC_FILE:-ansible/app-cred-chi-edge-openrc.sh}" && unset OS_PROJECT_ID OS_PROJECT_NAME OS_PROJECT_DOMAIN_ID OS_PROJECT_DOMAIN_NAME && uv run chi-edge device show "${EDGE_DEVICE_NAME:-soarm101-1}"'
 
+# List registered CHI@Edge devices visible to these credentials as redacted JSON
+edge-device-list:
+    uv run python scripts/reserve_edge.py --devices
+
 # Show current lease + server state as JSON (exits 2 if not SSH-ready)
 node-status:
     uv run python scripts/reserve.py --status
@@ -155,9 +159,13 @@ release:
 
 # Run Ansible provisioning (ROCm + LeRobot) against current inventory
 provision: check-env
+    ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
+    ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+    ANSIBLE_SSH_CONTROL_PATH_DIR=/tmp/ansible-cp \
     ansible-playbook \
         -i ansible/inventory.ini \
-        ansible/playbooks/setup_training_node.yml
+        ansible/playbooks/setup_training_node.yml \
+        --vault-password-file ansible/.vault_pass
 
 # Provision the KVM control node
 provision-control: check-env
@@ -257,10 +265,32 @@ arm-test: check-env
         "ls /dev/ttyACM* 2>/dev/null || echo 'NO SERIAL PORTS'"
     @echo "=== Cameras ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
-        "ls /dev/video0 /dev/video2 2>/dev/null && echo 'cameras OK' || echo 'cameras NOT FOUND'"
+        "ls /dev/video* 2>/dev/null || echo 'cameras NOT FOUND'"
     @echo "=== Calibration ==="
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"
+
+# Copy current arm calibration JSON files into a timestamped local backup.
+# Keep backups out of git; publish them only to a private artifact store.
+arm-calibration-backup label="manual": check-env
+    mkdir -p calibration-backups
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tar -C /app -czf /tmp/calibration-{{label}}.tgz calibration"
+    scp -P ${PI_PORT} root@{{_arm_host}}:/tmp/calibration-{{label}}.tgz \
+        calibration-backups/{{_arm_host}}-{{label}}-$(date -u +%Y%m%dT%H%M%SZ).tgz
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "rm -f /tmp/calibration-{{label}}.tgz"
+
+# List local calibration backup archives.
+arm-calibration-backups:
+    ls -lh calibration-backups/*.tgz 2>/dev/null || echo "No calibration backups found"
+
+# Restore a calibration backup archive into the running arm container.
+# Usage: just arm-calibration-restore archive=calibration-backups/<file>.tgz
+arm-calibration-restore archive: check-env
+    scp -P ${PI_PORT} {{archive}} root@{{_arm_host}}:/tmp/calibration-restore.tgz
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "mkdir -p /app/calibration && tar -C /app -xzf /tmp/calibration-restore.tgz && rm -f /tmp/calibration-restore.tgz && ls -l /app/calibration"
 
 # Collect demonstration episodes on the arm node: just arm-collect dataset=touch-block episodes=20
 arm-collect dataset episodes="20": check-env
@@ -290,6 +320,48 @@ arm-replay repo episode="0": check-env
            --dataset.repo_id={{repo}} \
            --dataset.episode={{episode}} \
            --play_sounds=false"
+
+# Run cable-safe SO-ARM101 teleop with follower wrist-roll clamped around the
+# current matched start pose. Put both wrists in a cable-safe matching pose first.
+arm-teleop-safe fps="30" wrist_degrees="15": check-env
+    scp scripts/safe_so101_teleoperate.py root@{{_arm_host}}:/tmp/safe_so101_teleoperate.py
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "python /tmp/safe_so101_teleoperate.py \
+           --fps {{fps}} \
+           --wrist-safe-degrees {{wrist_degrees}} \
+           --leader-port /dev/ttyACM0 \
+           --follower-port /dev/ttyACM1 \
+           --leader-id alpha_leader \
+           --follower-id alpha_follower \
+           --calibration-dir /app/calibration"
+
+# Same as arm-teleop-safe, but freezes follower wrist-roll exactly at startup.
+arm-teleop-freeze-wrist fps="30": check-env
+    scp scripts/safe_so101_teleoperate.py root@{{_arm_host}}:/tmp/safe_so101_teleoperate.py
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "python /tmp/safe_so101_teleoperate.py \
+           --fps {{fps}} \
+           --freeze-wrist-roll \
+           --leader-port /dev/ttyACM0 \
+           --follower-port /dev/ttyACM1 \
+           --leader-id alpha_leader \
+           --follower-id alpha_follower \
+           --calibration-dir /app/calibration"
+
+# Start Gradio camera preview on arm in a tmux session (then: just tunnel-arm → http://localhost:7860)
+# camera=0 → /dev/video0 (top)  camera=1 → /dev/video1  default: 0
+arm-preview camera="0": check-env
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tmux kill-session -t preview 2>/dev/null; \
+         tmux new-session -d -s preview \
+           'python /app/scripts/camera_preview.py --camera {{camera}} 2>&1 | tee /tmp/preview.log'"
+    @echo "Camera preview started (video{{camera}}) on {{_arm_host}}."
+    @echo "Run: just tunnel-arm   → http://localhost:7860"
+
+# Stop Gradio camera preview tmux session on arm
+arm-preview-stop: check-env
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tmux kill-session -t preview 2>/dev/null; echo preview stopped"
 
 # Open SSH tunnel to arm Gradio UI -> http://localhost:7860
 tunnel-arm: check-env
