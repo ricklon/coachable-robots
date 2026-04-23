@@ -291,6 +291,48 @@ arm-replay repo episode="0": check-env
            --dataset.episode={{episode}} \
            --play_sounds=false"
 
+# Run cable-safe SO-ARM101 teleop with follower wrist-roll clamped around the
+# current matched start pose. Put both wrists in a cable-safe matching pose first.
+arm-teleop-safe fps="30" wrist_degrees="15": check-env
+    scp scripts/safe_so101_teleoperate.py root@{{_arm_host}}:/tmp/safe_so101_teleoperate.py
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "python /tmp/safe_so101_teleoperate.py \
+           --fps {{fps}} \
+           --wrist-safe-degrees {{wrist_degrees}} \
+           --leader-port /dev/ttyACM0 \
+           --follower-port /dev/ttyACM1 \
+           --leader-id alpha_leader \
+           --follower-id alpha_follower \
+           --calibration-dir /app/calibration"
+
+# Same as arm-teleop-safe, but freezes follower wrist-roll exactly at startup.
+arm-teleop-freeze-wrist fps="30": check-env
+    scp scripts/safe_so101_teleoperate.py root@{{_arm_host}}:/tmp/safe_so101_teleoperate.py
+    ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "python /tmp/safe_so101_teleoperate.py \
+           --fps {{fps}} \
+           --freeze-wrist-roll \
+           --leader-port /dev/ttyACM0 \
+           --follower-port /dev/ttyACM1 \
+           --leader-id alpha_leader \
+           --follower-id alpha_follower \
+           --calibration-dir /app/calibration"
+
+# Start Gradio camera preview on arm in a tmux session (then: just tunnel-arm → http://localhost:7860)
+# camera=0 → /dev/video0 (top)  camera=1 → /dev/video1  default: 0
+arm-preview camera="0": check-env
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tmux kill-session -t preview 2>/dev/null; \
+         tmux new-session -d -s preview \
+           'python /app/scripts/camera_preview.py --camera {{camera}} 2>&1 | tee /tmp/preview.log'"
+    @echo "Camera preview started (video{{camera}}) on {{_arm_host}}."
+    @echo "Run: just tunnel-arm   → http://localhost:7860"
+
+# Stop Gradio camera preview tmux session on arm
+arm-preview-stop: check-env
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tmux kill-session -t preview 2>/dev/null; echo preview stopped"
+
 # Open SSH tunnel to arm Gradio UI -> http://localhost:7860
 tunnel-arm: check-env
     @echo "Tunneling arm Gradio UI -> http://localhost:7860 (host: {{_arm_host}})"
