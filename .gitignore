@@ -197,6 +197,10 @@ ansible/group_vars/all/vault.yml
 # Fleet config — contains real station assignments and coach names
 config/fleet.yaml
 
+# Robot calibration backups copied from live arms. Keep these local unless
+# intentionally published to a private artifact store.
+calibration-backups/
+
 # Ruff stuff:
 .ruff_cache/
 

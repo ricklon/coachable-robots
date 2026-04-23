@@ -270,6 +270,28 @@ arm-test: check-env
     ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
         "ls /mnt/data/calibration/*.json 2>/dev/null | wc -l | xargs -I{} echo '{} calibration file(s)'"
 
+# Copy current arm calibration JSON files into a timestamped local backup.
+# Keep backups out of git; publish them only to a private artifact store.
+arm-calibration-backup label="manual": check-env
+    mkdir -p calibration-backups
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "tar -C /app -czf /tmp/calibration-{{label}}.tgz calibration"
+    scp -P ${PI_PORT} root@{{_arm_host}}:/tmp/calibration-{{label}}.tgz \
+        calibration-backups/{{_arm_host}}-{{label}}-$(date -u +%Y%m%dT%H%M%SZ).tgz
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "rm -f /tmp/calibration-{{label}}.tgz"
+
+# List local calibration backup archives.
+arm-calibration-backups:
+    ls -lh calibration-backups/*.tgz 2>/dev/null || echo "No calibration backups found"
+
+# Restore a calibration backup archive into the running arm container.
+# Usage: just arm-calibration-restore archive=calibration-backups/<file>.tgz
+arm-calibration-restore archive: check-env
+    scp -P ${PI_PORT} {{archive}} root@{{_arm_host}}:/tmp/calibration-restore.tgz
+    ssh -p ${PI_PORT} -o StrictHostKeyChecking=no root@{{_arm_host}} \
+        "mkdir -p /app/calibration && tar -C /app -xzf /tmp/calibration-restore.tgz && rm -f /tmp/calibration-restore.tgz && ls -l /app/calibration"
+
 # Collect demonstration episodes on the arm node: just arm-collect dataset=touch-block episodes=20
 arm-collect dataset episodes="20": check-env
     ssh -p ${PI_PORT} -t -o StrictHostKeyChecking=no root@{{_arm_host}} \

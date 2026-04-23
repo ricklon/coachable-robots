@@ -148,6 +148,21 @@ Press `Ctrl+C` to exit (exits cleanly).
 > Calibration is stored in servo EEPROM and in `/mnt/data/calibration/*.json`.
 > It persists across container restarts and reboots.
 
+Back up the JSON files after a successful calibration. We use the same leader
+and follower arms across sessions, and losing these files means recalibrating
+before the next training run:
+
+```bash
+just arm-calibration-backup label=alpha-good
+just arm-calibration-backups
+```
+
+Restore only when you are sure the same physical arms and motor IDs are attached:
+
+```bash
+just arm-calibration-restore archive=calibration-backups/<backup>.tgz
+```
+
 ```bash
 ssh -p 22222 -t root@192.168.4.191 \
   "balena run -it --privileged \
