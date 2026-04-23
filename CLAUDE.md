@@ -228,7 +228,8 @@ coachable-robots/
 ├── .env.example                      # Shared project state template (copy to .env)
 ├── config/
 │   └── fleet.example.yaml            # Fleet topology: arms, training, inference, control
-├── CoachableRobots_v3.ipynb          # Comprehensive operator reference notebook (all features)
+├── archive/
+│   └── legacy-notebooks/             # Previous comprehensive operator notebooks
 ├── notebooks/                        # Student learning path (operator verifies via papermill)
 │   ├── 01_reserve_node.ipynb         # Reserve Chameleon MI100, write inventory
 │   ├── 02_lerobot.ipynb              # LeRobot-only: collect → train → deploy
@@ -497,7 +498,8 @@ This project frames imitation learning as "coaching" — students show the robot
 
 - `justfile` for operator actions — single entrypoint, all infra operations go through `just`
 - `notebooks/` for student workflows — stubs only, content authored by humans not agents
-- `CoachableRobots_v3.ipynb` is the operator reference — comprehensive, not decomposed
+- `archive/legacy-notebooks/CoachableRobots_v3.ipynb` is retained as a legacy
+  operator reference; current operator actions go through `just`
 - Ansible for infrastructure provisioning (not bash scripts over SSH)
 - Python 3.12 (LeRobot v0.5.0 requirement)
 - Markdown for all documentation (not docx unless explicitly requested)

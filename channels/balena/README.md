@@ -35,7 +35,7 @@ They must not run simultaneously.
 
 1. Stop the balena service: balena dashboard → device → stop service  
    (or `balena stop <device-uuid> <service>`)
-2. Run `Request_LeRobot_SOARM101.ipynb` Steps 4b → 5 to launch CHI@Edge container
+2. Run `just reserve-edge` or `just restart-arm` to launch the CHI@Edge container
 3. All hardware is now exclusively available to CHI@Edge
 
 **Do NOT** leave balena services running when launching CHI@Edge — they will hold

@@ -42,11 +42,11 @@ Pi enrolled on CHI@Edge, arms calibrated and verified, full collect→replay→p
 - For Jetson follow-up, treat GPU/runtime as confirmed working and focus support/debugging on CHI@Edge pod egress/NAT/DNS.
 
 ## In progress — KVM@TACC control node
-Provisioning notebook and Ansible playbook built (ControlNode_Setup.ipynb + ansible/playbooks/setup_control_node.yml). Next steps to run it:
+Legacy provisioning notebook and Ansible playbook built (`archive/legacy-notebooks/ControlNode_Setup.ipynb` + `ansible/playbooks/setup_control_node.yml`). Next steps to run it:
 1. Download KVM@TACC RC file from kvm.tacc.chameleoncloud.org → save as ansible/app-cred-kvm-tacc-openrc.sh
 2. Register SSH key pair at KVM@TACC (separate from CHI@TACC)
 3. Add vault_pi_ssh_private_key to ansible vault
-4. Run ControlNode_Setup.ipynb
+4. Run or port the legacy `archive/legacy-notebooks/ControlNode_Setup.ipynb` flow
 
 ## Future TODO — MI100 talkbot / inference benchmark
 - Attempted on 2026-04-15 against `coachable-training-node` at `129.114.109.229`.
